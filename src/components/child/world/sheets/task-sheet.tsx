@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { getChildHome } from "@/app/actions/child-home";
 import { submitTask } from "@/app/actions/child-tasks";
 import { TugasModal } from "@/components/child/tugas-modal";
+import { TaskIllustration } from "@/components/shared/task-illustration";
 import { soundManager } from "@/lib/sound/sound-manager";
 import { formatRupiah } from "@/lib/format";
 import type { TaskOverviewItem } from "@/app/actions/anak-overview";
@@ -55,23 +56,18 @@ export function TaskSheet({ childId, onClose, onChanged }: Props) {
         <div className="space-y-2">
           {tasks.map((task) => (
             <div key={task.id} className="flex items-center gap-3 rounded-xl border-2 border-[#EDEFF4] p-2.5">
-              <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] text-lg"
-                style={{ background: task.type === "tugas" ? "#EDE9FE" : "#E8F5E9" }}
-              >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
                 {task.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={task.imageUrl} alt="" className="h-full w-full object-cover" />
-                ) : task.type === "tugas" ? (
-                  "📘"
                 ) : (
-                  "✅"
+                  <TaskIllustration type={task.type} category={task.category} className="h-full w-full" iconClassName="h-5 w-5" />
                 )}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-heading text-[13px] font-extrabold text-[#1C1E26]">{task.title}</p>
                 <p className="text-[11px] font-bold text-[#9AA0AE]">
-                  🪙 {formatRupiah(task.rewardMoney)} · ⭐{task.rewardPoint}
+                  💵 {formatRupiah(task.rewardMoney)} · 🪙 {task.rewardPoint} · ⭐ {task.rewardXp} XP
                 </p>
               </div>
               {task.status === "approved" ? (
