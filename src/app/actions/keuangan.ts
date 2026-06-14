@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentSession } from "@/app/actions/auth";
 import { normalizeProductName, currentMonth, monthRange, sumBy } from "@/lib/finance";
+import { syncChildSaldoFromPocket } from "@/lib/server/child-savings";
 import { formatRupiah } from "@/lib/format";
 import type { PocketType, ShoppingTransactionSource } from "@/lib/supabase/types";
 
@@ -256,6 +257,7 @@ export async function deleteIncome(id: string): Promise<ActionResult> {
       balance: balanceBefore,
     }, { balance: balanceAfter });
 
+    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, balanceAfter - balanceBefore);
     await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
   }
 
@@ -409,6 +411,8 @@ export async function withdrawPocketBalance(id: string): Promise<ActionResult> {
     balance: amount,
   }, { balance: 0 });
 
+  await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -amount);
+
   revalidateKeuangan();
   await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
   return { success: true };
@@ -507,6 +511,7 @@ export async function transferPocket(input: TransferPocketInput): Promise<Action
     await logAudit(supabase, session.familyId, session.profileId, "pocket", fromPocket.id, "transfer_out", {
       balance: fromPocket.balance,
     }, { balance: newBalance });
+    await syncChildSaldoFromPocket(supabase, session.familyId, fromPocket.name, -input.amount);
   }
 
   if (toPocket) {
@@ -515,6 +520,7 @@ export async function transferPocket(input: TransferPocketInput): Promise<Action
     await logAudit(supabase, session.familyId, session.profileId, "pocket", toPocket.id, "transfer_in", {
       balance: toPocket.balance,
     }, { balance: newToBalance });
+    await syncChildSaldoFromPocket(supabase, session.familyId, toPocket.name, input.amount);
   }
 
   revalidateKeuangan();
@@ -613,6 +619,7 @@ export async function deletePocketTransfer(id: string): Promise<ActionResult> {
       await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "transfer_delete_revert", {
         balance: balanceBefore,
       }, { balance: balanceAfter });
+      await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, balanceAfter - balanceBefore);
       await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
     }
   }
@@ -631,6 +638,7 @@ export async function deletePocketTransfer(id: string): Promise<ActionResult> {
       await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "transfer_delete_revert", {
         balance: balanceBefore,
       }, { balance: balanceAfter });
+      await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, balanceAfter - balanceBefore);
       await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
     }
   }
@@ -740,11 +748,11 @@ export async function addShoppingTransaction(input: AddShoppingTransactionInput)
   const supabase = createAdminClient();
   const total = Math.round(input.qty * input.price);
 
-  let pocket: { id: string; balance: number } | null = null;
+  let pocket: { id: string; name: string; balance: number } | null = null;
   if (input.pocketId) {
     const { data } = await supabase
       .from("pockets")
-      .select("id, balance")
+      .select("id, name, balance")
       .eq("id", input.pocketId)
       .eq("family_id", session.familyId)
       .maybeSingle();
@@ -753,7 +761,7 @@ export async function addShoppingTransaction(input: AddShoppingTransactionInput)
     if (Number(data.balance) < total) {
       return { success: false, error: `Saldo pocket tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
     }
-    pocket = { id: data.id, balance: Number(data.balance) };
+    pocket = { id: data.id, name: data.name, balance: Number(data.balance) };
   }
 
   const productId = await resolveProduct(supabase, session.familyId, name, input.price);
@@ -780,6 +788,7 @@ export async function addShoppingTransaction(input: AddShoppingTransactionInput)
     await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "shopping_expense", {
       balance: pocket.balance,
     }, { balance: newBalance });
+    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -total);
   }
 
   revalidateKeuangan();
@@ -807,11 +816,11 @@ export async function addShoppingTransactionsBatch(input: AddShoppingTransaction
 
   const supabase = createAdminClient();
 
-  let pocket: { id: string; balance: number } | null = null;
+  let pocket: { id: string; name: string; balance: number } | null = null;
   if (input.pocketId) {
     const { data } = await supabase
       .from("pockets")
-      .select("id, balance")
+      .select("id, name, balance")
       .eq("id", input.pocketId)
       .eq("family_id", session.familyId)
       .maybeSingle();
@@ -820,7 +829,7 @@ export async function addShoppingTransactionsBatch(input: AddShoppingTransaction
     if (Number(data.balance) < total) {
       return { success: false, error: `Saldo pocket tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
     }
-    pocket = { id: data.id, balance: Number(data.balance) };
+    pocket = { id: data.id, name: data.name, balance: Number(data.balance) };
   }
 
   for (const item of items) {
@@ -846,6 +855,7 @@ export async function addShoppingTransactionsBatch(input: AddShoppingTransaction
     await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "shopping_expense", {
       balance: pocket.balance,
     }, { balance: newBalance });
+    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -total);
   }
 
   revalidateKeuangan();
@@ -1101,11 +1111,11 @@ export async function checkoutPlanItem(input: CheckoutPlanItemInput): Promise<Ac
 
   const total = Math.round(item.qty * input.actualPrice);
 
-  let pocket: { id: string; balance: number } | null = null;
+  let pocket: { id: string; name: string; balance: number } | null = null;
   if (input.pocketId) {
     const { data } = await supabase
       .from("pockets")
-      .select("id, balance")
+      .select("id, name, balance")
       .eq("id", input.pocketId)
       .eq("family_id", session.familyId)
       .maybeSingle();
@@ -1114,7 +1124,7 @@ export async function checkoutPlanItem(input: CheckoutPlanItemInput): Promise<Ac
     if (Number(data.balance) < total) {
       return { success: false, error: `Saldo pocket tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
     }
-    pocket = { id: data.id, balance: Number(data.balance) };
+    pocket = { id: data.id, name: data.name, balance: Number(data.balance) };
   }
 
   const productId = await resolveProduct(supabase, session.familyId, item.name, input.actualPrice);
@@ -1141,6 +1151,7 @@ export async function checkoutPlanItem(input: CheckoutPlanItemInput): Promise<Ac
     await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "shopping_expense", {
       balance: pocket.balance,
     }, { balance: newBalance });
+    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -total);
   }
 
   await supabase.from("shopping_plan_items").update({ checked: true, actual_price: input.actualPrice }).eq("id", input.itemId);

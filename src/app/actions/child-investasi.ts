@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireChild } from "@/lib/server/child-helpers";
 import { logAudit, type ActionResult } from "@/lib/server/admin-helpers";
+import { syncSavingsPocket } from "@/lib/server/child-savings";
 import { INVESTMENT } from "@/lib/constants";
 import type { InvestmentStatus } from "@/lib/supabase/types";
 
@@ -140,6 +141,8 @@ export async function startInvestment(childId: string, amount: number): Promise<
   }
 
   await supabase.from("profiles").update({ saldo: newSaldo, saldo_invested: newSaldoInvested }).eq("id", childId);
+
+  await syncSavingsPocket(supabase, profile.family_id, profile.name, -amount);
 
   await supabase.from("saldo_transactions").insert({
     profile_id: childId,

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, logAudit, type ActionResult } from "@/lib/server/admin-helpers";
 import { pushNotification } from "@/lib/server/notifications";
+import { syncSavingsPocket } from "@/lib/server/child-savings";
 import { formatRupiah } from "@/lib/format";
 import type { InvestmentStatus } from "@/lib/supabase/types";
 
@@ -122,6 +123,8 @@ export async function confirmInvestmentDone(investmentId: string): Promise<Actio
   const now = new Date().toISOString();
 
   await supabase.from("profiles").update({ saldo: newSaldo, saldo_invested: newSaldoInvested }).eq("id", profile.id);
+
+  await syncSavingsPocket(supabase, profile.family_id, profile.name, Number(inv.amount) + actualReturn);
 
   await supabase
     .from("investments")

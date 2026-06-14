@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, logAudit, type ActionResult } from "@/lib/server/admin-helpers";
 import { pushNotification } from "@/lib/server/notifications";
+import { syncSavingsPocket } from "@/lib/server/child-savings";
 import { formatRupiah, todayISODate } from "@/lib/format";
 import { isSunday, getWeekRange } from "@/lib/dunia-anak";
 import type { WithdrawalStatus } from "@/lib/supabase/types";
@@ -105,6 +106,8 @@ export async function reviewWithdrawalRequest(requestId: string, approve: boolea
   const newPoint = profile.point + bonusPoint;
 
   await supabase.from("profiles").update({ saldo: newSaldo, point: newPoint }).eq("id", profile.id);
+
+  await syncSavingsPocket(supabase, profile.family_id, profile.name, bonusMoney - Number(request.amount));
 
   await supabase
     .from("withdrawal_requests")

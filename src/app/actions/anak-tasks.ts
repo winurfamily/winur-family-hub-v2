@@ -7,6 +7,7 @@ import { generateJSON, generateAndStoreImage, hasOpenAIKey } from "@/lib/ai";
 import { applyXpGain } from "@/lib/dunia-anak";
 import { unlockAssetsForProfile } from "@/lib/server/assets";
 import { pushNotification } from "@/lib/server/notifications";
+import { syncSavingsPocket } from "@/lib/server/child-savings";
 import { computeWeeklyStreak } from "@/app/actions/anak-overview";
 import { currentMonth, monthRange } from "@/lib/finance";
 import { formatRupiah, todayISODate } from "@/lib/format";
@@ -249,6 +250,8 @@ export async function approveTask(taskId: string): Promise<ActionResult> {
       xp_next_level: xpResult.xpNextLevel,
     })
     .eq("id", profile.id);
+
+  await syncSavingsPocket(supabase, profile.family_id, profile.name, Number(task.reward_money));
 
   await supabase
     .from("tasks")
