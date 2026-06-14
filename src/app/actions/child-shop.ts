@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireChild } from "@/lib/server/child-helpers";
 import { logAudit, type ActionResult } from "@/lib/server/admin-helpers";
+import { pushAdminNotification } from "@/lib/server/notifications";
 
 export interface ShopRewardItem {
   id: string;
@@ -70,7 +71,7 @@ export async function requestPointReward(childId: string, rewardId: string): Pro
   if (!session) return { success: false, error: "Tidak diizinkan." };
 
   const supabase = createAdminClient();
-  const { data: profile } = await supabase.from("profiles").select("family_id, point").eq("id", childId).maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("family_id, name, point").eq("id", childId).maybeSingle();
   if (!profile) return { success: false, error: "Profil tidak ditemukan." };
 
   const { data: reward } = await supabase.from("point_rewards").select("*").eq("id", rewardId).maybeSingle();
@@ -118,6 +119,15 @@ export async function requestPointReward(childId: string, rewardId: string): Pro
     reward_name: reward.name,
     point_cost: reward.point_cost,
   });
+
+  await pushAdminNotification(
+    supabase,
+    profile.family_id,
+    "point_request_created",
+    "Penukaran Hadiah Baru 🎁",
+    `${profile.name} ingin menukar "${reward.name}" (${reward.point_cost} pt).`,
+    { childId, requestId: inserted.id, href: "/admin/dunia-anak/point-shop" }
+  );
 
   revalidatePath(`/child/${childId}/shop`);
   return { success: true };

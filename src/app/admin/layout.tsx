@@ -5,6 +5,10 @@ import { getCurrentSession } from "@/app/actions/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SwitchProfileButton } from "@/components/shared/switch-profile-button";
 import { BgmTrigger } from "@/components/shared/bgm-trigger";
+import { AdminNotificationBell } from "@/components/admin/notification-bell";
+import { getAdminNotifications, getUnreadAdminNotificationCount } from "@/app/actions/admin-notifications";
+
+export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getCurrentSession();
@@ -14,11 +18,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   const supabase = createAdminClient();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", session.profileId)
-    .maybeSingle();
+  const [{ data: profile }, notifications, unreadCount] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", session.profileId).maybeSingle(),
+    getAdminNotifications(),
+    getUnreadAdminNotificationCount(),
+  ]);
 
   return (
     <div className="admin-shell min-h-screen bg-background text-ink-1 safe-top">
@@ -37,7 +41,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               </span>
             </span>
           </Link>
-          <SwitchProfileButton />
+          <div className="flex items-center gap-2.5">
+            <AdminNotificationBell initialNotifications={notifications} initialUnreadCount={unreadCount} />
+            <SwitchProfileButton />
+          </div>
         </div>
       </header>
 

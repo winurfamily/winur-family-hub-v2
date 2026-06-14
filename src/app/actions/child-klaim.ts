@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireChild } from "@/lib/server/child-helpers";
 import { logAudit, type ActionResult } from "@/lib/server/admin-helpers";
+import { pushAdminNotification } from "@/lib/server/notifications";
 import { computeWeeklyStreak } from "@/app/actions/anak-overview";
-import { todayISODate } from "@/lib/format";
+import { formatRupiah, todayISODate } from "@/lib/format";
 import { isSunday } from "@/lib/dunia-anak";
 import { REWARD } from "@/lib/constants";
 import type { WithdrawalStatus, SaldoTransactionType } from "@/lib/supabase/types";
@@ -175,6 +176,15 @@ export async function requestWithdrawal(childId: string, amount: number, include
     include_streak_bonus: includeStreakBonus,
     streak_bonus_amount: streakBonusAmount,
   });
+
+  await pushAdminNotification(
+    supabase,
+    profile.family_id,
+    "withdrawal_requested",
+    "Tarik Dana Baru 💰",
+    `${profile.name} mengajukan tarik dana ${formatRupiah(amount)}.`,
+    { childId, requestId: inserted.id, href: `/admin/dunia-anak/${childId}/tarik-dana` }
+  );
 
   revalidatePath(`/child/${childId}/klaim`);
   return { success: true };

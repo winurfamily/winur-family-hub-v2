@@ -508,7 +508,7 @@ export function ChildWorld(props: ChildWorldProps) {
               </span>
             </div>
           </div>
-          <Pill border={personal}>💵 {formatShort(saldo)}</Pill>
+          <Pill border={personal} onClick={() => openSheet("celengan")}>💵 {formatShort(saldo)}</Pill>
           <Pill border="#FFD93D" onClick={() => openSheet("shop")}>
             🪙 {point}
           </Pill>
