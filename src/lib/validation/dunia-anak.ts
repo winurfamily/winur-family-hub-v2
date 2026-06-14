@@ -24,6 +24,7 @@ export const publishTaskSchema = z.object({
   rewardPoint: z.coerce.number().int().min(0),
   rewardXp: z.coerce.number().int().min(0),
   questions: z.array(tugasQuestionSchema).optional(),
+  dayDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal tidak valid").optional(),
 });
 export type PublishTaskInput = z.infer<typeof publishTaskSchema>;
 

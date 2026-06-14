@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronDown, ChevronUp, Clock, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, Clock, Trash2, X } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { TaskIllustration } from "@/components/shared/task-illustration";
 import { formatRupiah } from "@/lib/format";
-import { approveTask } from "@/app/actions/anak-tasks";
+import { approveTask, deleteTask } from "@/app/actions/anak-tasks";
 import type { TaskOverviewItem } from "@/app/actions/anak-overview";
 
 const STATUS_LABEL: Record<TaskOverviewItem["status"], string> = {
@@ -19,8 +20,10 @@ const STATUS_LABEL: Record<TaskOverviewItem["status"], string> = {
 };
 
 export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showDetail, setShowDetail] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleApprove = () => {
     startTransition(async () => {
@@ -30,6 +33,19 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
         return;
       }
       toast.success("Task disetujui! Saldo, point, dan XP sudah ditambahkan.");
+    });
+  };
+
+  const handleDelete = () => {
+    startTransition(async () => {
+      const result = await deleteTask(task.id);
+      if (!result.success) {
+        toast.error(result.error ?? "Gagal menghapus.");
+        setConfirmDelete(false);
+        return;
+      }
+      toast.success(`${task.type === "tugas" ? "Tugas" : "Task"} dihapus.`);
+      router.refresh();
     });
   };
 
@@ -113,6 +129,22 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
           {isPending ? "Memproses..." : "Approve & Berikan Reward"}
         </GameButton>
       )}
+
+      {task.status === "published" &&
+        (confirmDelete ? (
+          <div className="flex items-center gap-2">
+            <GameButton variant="outline" size="sm" block onClick={() => setConfirmDelete(false)} disabled={isPending} playSound={false}>
+              Batal
+            </GameButton>
+            <GameButton variant="primary" size="sm" block onClick={handleDelete} disabled={isPending} playSound={false}>
+              {isPending ? "Menghapus..." : "Yakin Hapus?"}
+            </GameButton>
+          </div>
+        ) : (
+          <GameButton variant="outline" size="sm" block onClick={() => setConfirmDelete(true)} disabled={isPending}>
+            <Trash2 className="w-4 h-4 text-destructive" /> Hapus
+          </GameButton>
+        ))}
 
       {task.status === "approved" && (
         <div className="flex items-center gap-1 text-secondary text-sm font-bold">

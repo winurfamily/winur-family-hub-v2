@@ -157,13 +157,13 @@ export async function publishTask(input: PublishTaskInput): Promise<ActionResult
   if (!session) return { success: false, error: "Tidak diizinkan." };
 
   const supabase = createAdminClient();
-  const today = todayISODate();
+  const dayDate = input.dayDate ?? todayISODate();
 
   const { data: existingTasks } = await supabase
     .from("tasks")
     .select("id, type")
     .eq("profile_id", input.childId)
-    .eq("day_date", today)
+    .eq("day_date", dayDate)
     .neq("status", "skipped");
 
   const taskCount = (existingTasks ?? []).filter((t) => t.type === "task").length;
@@ -189,7 +189,7 @@ export async function publishTask(input: PublishTaskInput): Promise<ActionResult
       image_url: input.imageUrl ?? null,
       category: input.category ?? null,
       questions: input.type === "tugas" ? input.questions ?? null : null,
-      day_date: today,
+      day_date: dayDate,
       reward_money: input.rewardMoney,
       reward_point: input.rewardPoint,
       reward_xp: input.rewardXp,
@@ -207,12 +207,86 @@ export async function publishTask(input: PublishTaskInput): Promise<ActionResult
   await logAudit(supabase, session.familyId, session.profileId, "tasks", inserted.id, "publish", null, {
     type: input.type,
     title: input.title,
+    day_date: dayDate,
     reward_money: input.rewardMoney,
     reward_point: input.rewardPoint,
     reward_xp: input.rewardXp,
   });
 
   revalidateChild(input.childId);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Jumlah task/tugas yang sudah dipublikasikan untuk tanggal tertentu
+// ---------------------------------------------------------------------------
+
+export interface TaskCounts {
+  taskCount: number;
+  tugasCount: number;
+}
+
+export async function getTaskCountsForDate(childId: string, date: string): Promise<TaskCounts> {
+  const session = await requireAdmin();
+  if (!session) return { taskCount: 0, tugasCount: 0 };
+
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("tasks")
+    .select("type")
+    .eq("profile_id", childId)
+    .eq("day_date", date)
+    .neq("status", "skipped");
+
+  return {
+    taskCount: (data ?? []).filter((t) => t.type === "task").length,
+    tugasCount: (data ?? []).filter((t) => t.type === "tugas").length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Hapus task/tugas yang belum diambil anak
+// ---------------------------------------------------------------------------
+
+export async function deleteTask(taskId: string): Promise<ActionResult> {
+  const session = await requireAdmin();
+  if (!session) return { success: false, error: "Tidak diizinkan." };
+
+  const supabase = createAdminClient();
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("id, profile_id, type, title, status, day_date")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) return { success: false, error: "Task tidak ditemukan." };
+  if (task.status !== "published") {
+    return { success: false, error: "Hanya task/tugas yang belum diambil yang bisa dihapus." };
+  }
+
+  const { data: profile } = await supabase.from("profiles").select("family_id").eq("id", task.profile_id).maybeSingle();
+  if (!profile || profile.family_id !== session.familyId) {
+    return { success: false, error: "Tidak diizinkan." };
+  }
+
+  const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+  if (error) {
+    console.error("deleteTask error", error);
+    return { success: false, error: "Gagal menghapus." };
+  }
+
+  await logAudit(
+    supabase,
+    session.familyId,
+    session.profileId,
+    "tasks",
+    task.id,
+    "delete",
+    { type: task.type, title: task.title, day_date: task.day_date, status: task.status },
+    null
+  );
+
+  revalidateChild(task.profile_id);
   return { success: true };
 }
 

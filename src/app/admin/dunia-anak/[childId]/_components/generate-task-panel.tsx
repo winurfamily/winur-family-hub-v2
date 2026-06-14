@@ -10,9 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TaskIllustration } from "@/components/shared/task-illustration";
-import { generateTaskDraft, publishTask, type TaskDraft } from "@/app/actions/anak-tasks";
+import { generateTaskDraft, publishTask, getTaskCountsForDate, type TaskDraft } from "@/app/actions/anak-tasks";
 import type { TugasQuestionInput, FamilySettingsInput } from "@/lib/validation/dunia-anak";
 import { REWARD, getTaskCategories } from "@/lib/constants";
+import { todayISODate, formatDate } from "@/lib/format";
 
 function emptyQuestions(): TugasQuestionInput[] {
   return Array.from({ length: 5 }, () => ({
@@ -35,6 +36,9 @@ export function GenerateTaskPanel({
   rewardDefaults: FamilySettingsInput | null;
 }) {
   const router = useRouter();
+  const today = todayISODate();
+  const [dayDate, setDayDate] = useState(today);
+  const [counts, setCounts] = useState({ taskCount, tugasCount });
   const [type, setType] = useState<"task" | "tugas" | null>(null);
   const [category, setCategory] = useState<string>("");
   const [useAiImage, setUseAiImage] = useState(true);
@@ -47,9 +51,22 @@ export function GenerateTaskPanel({
   const [questions, setQuestions] = useState<TugasQuestionInput[]>([]);
   const [isGenerating, startGenerate] = useTransition();
   const [isPublishing, startPublish] = useTransition();
+  const [isLoadingCounts, startCounts] = useTransition();
 
-  const taskMax = taskCount >= REWARD.MAX_TASK_PER_DAY;
-  const tugasMax = tugasCount >= REWARD.MAX_TUGAS_PER_DAY;
+  const taskMax = counts.taskCount >= REWARD.MAX_TASK_PER_DAY;
+  const tugasMax = counts.tugasCount >= REWARD.MAX_TUGAS_PER_DAY;
+
+  const handleDateChange = (value: string) => {
+    setDayDate(value);
+    if (value === today) {
+      setCounts({ taskCount, tugasCount });
+      return;
+    }
+    startCounts(async () => {
+      const result = await getTaskCountsForDate(childId, value);
+      setCounts(result);
+    });
+  };
 
   const reset = () => {
     setType(null);
@@ -154,6 +171,7 @@ export function GenerateTaskPanel({
         rewardPoint,
         rewardXp,
         questions: type === "tugas" ? questions : undefined,
+        dayDate,
       });
 
       if (!res.success) {
@@ -161,7 +179,12 @@ export function GenerateTaskPanel({
         return;
       }
 
-      toast.success(`${type === "tugas" ? "Tugas" : "Task"} berhasil dipublikasikan.`);
+      const label = type === "tugas" ? "Tugas" : "Task";
+      const dateLabel = dayDate === today ? "" : ` untuk ${formatDate(dayDate)}`;
+      toast.success(`${label} berhasil dipublikasikan${dateLabel}.`);
+      setCounts((prev) =>
+        type === "task" ? { ...prev, taskCount: prev.taskCount + 1 } : { ...prev, tugasCount: prev.tugasCount + 1 }
+      );
       reset();
       router.refresh();
     });
@@ -175,21 +198,35 @@ export function GenerateTaskPanel({
         <Sparkles className="w-5 h-5 text-accent" /> Tambah Task & Tugas
       </h2>
 
+      {!draft && (
+        <div className="space-y-1">
+          <Label>Tanggal</Label>
+          <Input type="date" value={dayDate} onChange={(e) => handleDateChange(e.target.value)} disabled={!!type} />
+          <p className="text-xs text-ink-3">
+            {isLoadingCounts
+              ? "Memuat jumlah task..."
+              : dayDate === today
+                ? "Task & tugas akan tampil hari ini."
+                : `Task & tugas akan tampil pada ${formatDate(dayDate)}.`}
+          </p>
+        </div>
+      )}
+
       {!type && !draft && (
         <div className="grid grid-cols-2 gap-2">
-          <GameButton type="button" variant="primary" disabled={taskMax} onClick={() => selectType("task")}>
-            {`Task (${taskCount}/${REWARD.MAX_TASK_PER_DAY})`}
+          <GameButton type="button" variant="primary" disabled={taskMax || isLoadingCounts} onClick={() => selectType("task")}>
+            {`Task (${counts.taskCount}/${REWARD.MAX_TASK_PER_DAY})`}
           </GameButton>
-          <GameButton type="button" variant="accent" disabled={tugasMax} onClick={() => selectType("tugas")}>
-            {`Tugas (${tugasCount}/${REWARD.MAX_TUGAS_PER_DAY})`}
+          <GameButton type="button" variant="accent" disabled={tugasMax || isLoadingCounts} onClick={() => selectType("tugas")}>
+            {`Tugas (${counts.tugasCount}/${REWARD.MAX_TUGAS_PER_DAY})`}
           </GameButton>
         </div>
       )}
 
       {(taskMax || tugasMax) && !type && !draft && (
         <p className="text-xs text-ink-3">
-          {taskMax && "Task hari ini sudah maksimal. "}
-          {tugasMax && "Tugas hari ini sudah maksimal."}
+          {taskMax && "Task pada tanggal ini sudah maksimal. "}
+          {tugasMax && "Tugas pada tanggal ini sudah maksimal."}
         </p>
       )}
 
