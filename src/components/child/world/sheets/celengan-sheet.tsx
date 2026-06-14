@@ -63,7 +63,11 @@ export function CelenganSheet({ childId, onClose, onChanged }: Props) {
           <div className="mb-3 grid grid-cols-3 gap-2.5">
             <Stat label="TABUNGAN" value={formatRupiah(data.saldo)} color="#388E3C" />
             <Stat label="POINT" value={`⭐ ${data.point}`} color="#7C3AED" />
-            <Stat label="MENUNGGU" value={formatRupiah(data.pendingRequest?.amount ?? 0)} color="#E8561F" />
+            <Stat
+              label="MENUNGGU"
+              value={formatRupiah((data.pendingRequest?.amount ?? 0) + data.pendingTaskRewardMoney)}
+              color="#E8561F"
+            />
           </div>
 
           <div className="mb-3 flex gap-1.5">

@@ -8,6 +8,8 @@ import type { AdminClient } from "@/lib/server/admin-helpers";
 export type NotificationType =
   | "task_approved"
   | "tugas_approved"
+  | "task_rejected"
+  | "tugas_rejected"
   | "level_up"
   | "unlock_avatar"
   | "unlock_pet"

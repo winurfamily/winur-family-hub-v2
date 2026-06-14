@@ -417,6 +417,62 @@ export async function approveTask(taskId: string): Promise<ActionResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Tolak task submitted -> dikembalikan untuk dikerjakan ulang
+// ---------------------------------------------------------------------------
+
+export async function rejectTask(taskId: string): Promise<ActionResult> {
+  const session = await requireAdmin();
+  if (!session) return { success: false, error: "Tidak diizinkan." };
+
+  const supabase = createAdminClient();
+
+  const { data: task } = await supabase.from("tasks").select("*").eq("id", taskId).maybeSingle();
+  if (!task) return { success: false, error: "Task tidak ditemukan." };
+  if (task.status !== "submitted") return { success: false, error: "Task belum disubmit oleh anak." };
+
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", task.profile_id).maybeSingle();
+  if (!profile || profile.family_id !== session.familyId) {
+    return { success: false, error: "Profil anak tidak ditemukan." };
+  }
+
+  await supabase
+    .from("tasks")
+    .update({
+      status: "taken" as TaskStatus,
+      submitted_at: null,
+      user_answers: null,
+      score: null,
+    })
+    .eq("id", taskId);
+
+  await logAudit(supabase, session.familyId, session.profileId, "tasks", task.id, "reject", { status: "submitted" }, { status: "taken" });
+
+  if (task.type === "task") {
+    await pushNotification(
+      supabase,
+      profile.id,
+      "task_rejected",
+      "Perlu Dikerjakan Ulang 🔄",
+      `"${task.title}" ditolak oleh Ayah/Mamah. Coba kerjakan lagi ya!`,
+      { taskId: task.id }
+    );
+  } else {
+    await pushNotification(
+      supabase,
+      profile.id,
+      "tugas_rejected",
+      "Perlu Dikerjakan Ulang 🔄",
+      `"${task.title}" ditolak oleh Ayah/Mamah. Coba kerjakan lagi ya!`,
+      { taskId: task.id }
+    );
+  }
+
+  revalidateChild(profile.id);
+  revalidatePath(`/child/${profile.id}`);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
 // Riwayat task per anak
 // ---------------------------------------------------------------------------
 

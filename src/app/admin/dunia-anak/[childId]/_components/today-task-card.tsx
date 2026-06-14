@@ -7,7 +7,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Clock, Trash2, X } from "lucide-r
 import { GameButton } from "@/components/ui/game-button";
 import { TaskIllustration } from "@/components/shared/task-illustration";
 import { formatRupiah } from "@/lib/format";
-import { approveTask, deleteTask } from "@/app/actions/anak-tasks";
+import { approveTask, rejectTask, deleteTask } from "@/app/actions/anak-tasks";
 import type { TaskOverviewItem } from "@/app/actions/anak-overview";
 
 const STATUS_LABEL: Record<TaskOverviewItem["status"], string> = {
@@ -24,6 +24,7 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
   const [isPending, startTransition] = useTransition();
   const [showDetail, setShowDetail] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReject, setConfirmReject] = useState(false);
 
   const handleApprove = () => {
     startTransition(async () => {
@@ -33,6 +34,19 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
         return;
       }
       toast.success("Task disetujui! Saldo, point, dan XP sudah ditambahkan.");
+    });
+  };
+
+  const handleReject = () => {
+    startTransition(async () => {
+      const result = await rejectTask(task.id);
+      if (!result.success) {
+        toast.error(result.error ?? "Gagal menolak task.");
+        setConfirmReject(false);
+        return;
+      }
+      toast.success(`${task.type === "tugas" ? "Tugas" : "Task"} ditolak, anak perlu mengerjakan ulang.`);
+      setConfirmReject(false);
     });
   };
 
@@ -123,12 +137,27 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
         </div>
       )}
 
-      {task.status === "submitted" && (
-        <GameButton variant="secondary" size="sm" block onClick={handleApprove} disabled={isPending}>
-          <CheckCircle2 className="w-4 h-4" />
-          {isPending ? "Memproses..." : "Approve & Berikan Reward"}
-        </GameButton>
-      )}
+      {task.status === "submitted" &&
+        (confirmReject ? (
+          <div className="flex items-center gap-2">
+            <GameButton variant="outline" size="sm" block onClick={() => setConfirmReject(false)} disabled={isPending} playSound={false}>
+              Batal
+            </GameButton>
+            <GameButton variant="primary" size="sm" block onClick={handleReject} disabled={isPending} playSound={false}>
+              {isPending ? "Memproses..." : "Ya, Tolak"}
+            </GameButton>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <GameButton variant="outline" size="sm" block onClick={() => setConfirmReject(true)} disabled={isPending}>
+              <X className="w-4 h-4 text-destructive" /> Tolak
+            </GameButton>
+            <GameButton variant="secondary" size="sm" block onClick={handleApprove} disabled={isPending}>
+              <CheckCircle2 className="w-4 h-4" />
+              {isPending ? "Memproses..." : "Approve & Berikan Reward"}
+            </GameButton>
+          </div>
+        ))}
 
       {task.status === "published" &&
         (confirmDelete ? (

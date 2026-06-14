@@ -40,6 +40,7 @@ export interface ClaimOverview {
   streakBonusMoney: number;
   streakBonusPoint: number;
   pendingRequest: WithdrawalHistoryItem | null;
+  pendingTaskRewardMoney: number;
   history: WithdrawalHistoryItem[];
   recentTransactions: SaldoTransactionItem[];
 }
@@ -53,7 +54,7 @@ export async function getChildKlaim(childId: string): Promise<ClaimOverview | nu
   if (!profile) return null;
 
   const today = todayISODate();
-  const [streak, family, withdrawalsRes, txRes] = await Promise.all([
+  const [streak, family, withdrawalsRes, txRes, pendingTasksRes] = await Promise.all([
     computeWeeklyStreak(supabase, childId, today),
     supabase.from("families").select("streak_bonus_money, streak_bonus_point").eq("id", profile.family_id).maybeSingle(),
     supabase
@@ -68,6 +69,7 @@ export async function getChildKlaim(childId: string): Promise<ClaimOverview | nu
       .eq("profile_id", childId)
       .order("created_at", { ascending: false })
       .limit(10),
+    supabase.from("tasks").select("reward_money").eq("profile_id", childId).eq("status", "submitted"),
   ]);
 
   const history: WithdrawalHistoryItem[] = (withdrawalsRes.data ?? []).map((w) => ({
@@ -99,6 +101,7 @@ export async function getChildKlaim(childId: string): Promise<ClaimOverview | nu
     streakBonusMoney: Number(family.data?.streak_bonus_money ?? REWARD.STREAK_BONUS_MONEY),
     streakBonusPoint: family.data?.streak_bonus_point ?? REWARD.STREAK_BONUS_POINT,
     pendingRequest: history.find((h) => h.status === "pending") ?? null,
+    pendingTaskRewardMoney: (pendingTasksRes.data ?? []).reduce((sum, t) => sum + Number(t.reward_money), 0),
     history,
     recentTransactions,
   };

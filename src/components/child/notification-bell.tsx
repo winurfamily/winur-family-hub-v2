@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 const NOTIF_ICON: Record<string, string> = {
   task_approved: "✅",
   tugas_approved: "📘",
+  task_rejected: "↩️",
+  tugas_rejected: "↩️",
   level_up: "⭐",
   unlock_avatar: "🎭",
   unlock_pet: "🐾",
