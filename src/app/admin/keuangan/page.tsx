@@ -1,7 +1,8 @@
 import { Wallet, TrendingDown, History, PiggyBank } from "lucide-react";
 import { getFinanceSummary, getIncomeHistory } from "@/app/actions/keuangan";
-import { formatRupiah, formatDate } from "@/lib/format";
+import { formatRupiah } from "@/lib/format";
 import { IncomeDialog } from "./_components/income-dialog";
+import { IncomeHistory } from "./_components/income-history";
 
 export default async function KeuanganDashboardPage() {
   const [summary, incomeHistory] = await Promise.all([getFinanceSummary(), getIncomeHistory(5)]);
@@ -37,24 +38,7 @@ export default async function KeuanganDashboardPage() {
           <h2 className="font-heading font-extrabold text-ink-1 mb-3 flex items-center gap-2">
             <History className="w-4 h-4 text-accent" /> Pendapatan Terbaru
           </h2>
-          {incomeHistory.length === 0 ? (
-            <p className="text-sm text-ink-2 text-center py-4">Belum ada pendapatan tercatat.</p>
-          ) : (
-            <div className="space-y-3">
-              {incomeHistory.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-2 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-bold text-ink-1 truncate">{item.source}</p>
-                    <p className="text-xs text-ink-3">
-                      {formatDate(item.date)}
-                      {item.note ? ` • ${item.note}` : ""}
-                    </p>
-                  </div>
-                  <p className="font-heading font-extrabold text-secondary shrink-0">+{formatRupiah(item.amount)}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          <IncomeHistory items={incomeHistory} />
         </div>
       </div>
 

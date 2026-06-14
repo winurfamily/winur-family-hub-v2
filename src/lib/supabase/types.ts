@@ -294,6 +294,7 @@ export type PocketTransferRow = {
   to_pocket_id: string;
   amount: number;
   note: string | null;
+  income_id: string | null;
   created_by: string | null;
   created_at: string;
 };
@@ -476,7 +477,7 @@ export interface Database {
       income: Helper<IncomeRow, "id" | "note" | "created_by" | "created_at">;
       pocket_transfers: Helper<
         PocketTransferRow,
-        "id" | "from_pocket_id" | "note" | "created_by" | "created_at"
+        "id" | "from_pocket_id" | "note" | "income_id" | "created_by" | "created_at"
       >;
       products: Helper<
         ProductRow,

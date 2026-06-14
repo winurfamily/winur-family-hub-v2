@@ -327,6 +327,7 @@ create table pocket_transfers (
   to_pocket_id    uuid not null references pockets(id),
   amount          numeric(12,2) not null check (amount > 0),
   note            text,
+  income_id       uuid references income(id) on delete set null,
   created_by      uuid references profiles(id),
   created_at      timestamptz default now()
 );

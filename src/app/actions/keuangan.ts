@@ -224,6 +224,7 @@ export async function addIncome(input: AddIncomeInput): Promise<ActionResult> {
       to_pocket_id: pocket.id,
       amount: splitAmount,
       note: `Auto-split dari pendapatan: ${source}`,
+      income_id: income.id,
       created_by: session.profileId,
     });
 
@@ -235,6 +236,64 @@ export async function addIncome(input: AddIncomeInput): Promise<ActionResult> {
       balance: balanceBefore,
     }, { balance: balanceAfter });
   }
+
+  revalidateKeuangan();
+  return { success: true };
+}
+
+export async function deleteIncome(id: string): Promise<ActionResult> {
+  const session = await requireAdmin();
+  if (!session) return { success: false, error: "Tidak diizinkan." };
+
+  const supabase = createAdminClient();
+  const { data: income } = await supabase
+    .from("income")
+    .select("id, source, amount, date")
+    .eq("id", id)
+    .eq("family_id", session.familyId)
+    .maybeSingle();
+
+  if (!income) return { success: false, error: "Pendapatan tidak ditemukan." };
+
+  // Batalkan auto-split yang dibuat saat pendapatan ini dicatat
+  const { data: splits } = await supabase
+    .from("pocket_transfers")
+    .select("id, to_pocket_id, amount")
+    .eq("family_id", session.familyId)
+    .eq("income_id", id);
+
+  for (const split of splits ?? []) {
+    const { data: pocket } = await supabase
+      .from("pockets")
+      .select("id, name, balance")
+      .eq("id", split.to_pocket_id)
+      .maybeSingle();
+
+    if (!pocket) continue;
+
+    const balanceBefore = Number(pocket.balance);
+    const balanceAfter = Math.max(0, balanceBefore - Number(split.amount));
+    await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
+
+    await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "auto_split_revert", {
+      balance: balanceBefore,
+    }, { balance: balanceAfter });
+
+    await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
+  }
+
+  if (splits && splits.length > 0) {
+    await supabase.from("pocket_transfers").delete().eq("income_id", id);
+  }
+
+  const { error } = await supabase.from("income").delete().eq("id", id).eq("family_id", session.familyId);
+  if (error) return { success: false, error: "Gagal menghapus pendapatan." };
+
+  await logAudit(supabase, session.familyId, session.profileId, "income", id, "delete", {
+    source: income.source,
+    amount: Number(income.amount),
+    date: income.date,
+  }, null);
 
   revalidateKeuangan();
   return { success: true };
