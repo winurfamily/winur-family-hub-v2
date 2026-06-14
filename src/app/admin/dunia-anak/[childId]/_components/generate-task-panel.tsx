@@ -29,15 +29,20 @@ export function GenerateTaskPanel({
   taskCount,
   tugasCount,
   rewardDefaults,
+  dayDate,
+  onDateChange,
+  onPublished,
 }: {
   childId: string;
   taskCount: number;
   tugasCount: number;
   rewardDefaults: FamilySettingsInput | null;
+  dayDate: string;
+  onDateChange: (date: string) => void;
+  onPublished?: () => void;
 }) {
   const router = useRouter();
   const today = todayISODate();
-  const [dayDate, setDayDate] = useState(today);
   const [counts, setCounts] = useState({ taskCount, tugasCount });
   const [type, setType] = useState<"task" | "tugas" | null>(null);
   const [category, setCategory] = useState<string>("");
@@ -57,7 +62,7 @@ export function GenerateTaskPanel({
   const tugasMax = counts.tugasCount >= REWARD.MAX_TUGAS_PER_DAY;
 
   const handleDateChange = (value: string) => {
-    setDayDate(value);
+    onDateChange(value);
     if (value === today) {
       setCounts({ taskCount, tugasCount });
       return;
@@ -187,6 +192,7 @@ export function GenerateTaskPanel({
       );
       reset();
       router.refresh();
+      onPublished?.();
     });
   };
 

@@ -3,9 +3,8 @@ import { getChildOverview } from "@/app/actions/anak-overview";
 import { getTaskHistory } from "@/app/actions/anak-tasks";
 import { getFamilySettings } from "@/app/actions/anak-settings";
 import { currentMonth } from "@/lib/finance";
-import { GenerateTaskPanel } from "../_components/generate-task-panel";
 import { TaskHistory } from "../_components/task-history";
-import { TodayTaskCard } from "../_components/today-task-card";
+import { TugasTabContent } from "../_components/tugas-tab-content";
 
 export default async function ChildTugasPage({ params }: { params: Promise<{ childId: string }> }) {
   const { childId } = await params;
@@ -23,18 +22,13 @@ export default async function ChildTugasPage({ params }: { params: Promise<{ chi
 
   return (
     <div className="space-y-4">
-      <GenerateTaskPanel childId={childId} taskCount={taskCount} tugasCount={tugasCount} rewardDefaults={familySettings} />
-
-      {overview.todayTasks.length > 0 && (
-        <div className="space-y-2">
-          <h2 className="font-heading font-extrabold text-ink-1">Task & Tugas Hari Ini</h2>
-          <div className="space-y-3">
-            {overview.todayTasks.map((task) => (
-              <TodayTaskCard key={task.id} task={task} />
-            ))}
-          </div>
-        </div>
-      )}
+      <TugasTabContent
+        childId={childId}
+        initialTasks={overview.todayTasks}
+        taskCount={taskCount}
+        tugasCount={tugasCount}
+        rewardDefaults={familySettings}
+      />
 
       <TaskHistory childId={childId} initialMonth={month} initialData={history} />
     </div>

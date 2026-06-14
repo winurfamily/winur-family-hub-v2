@@ -19,7 +19,7 @@ const STATUS_LABEL: Record<TaskOverviewItem["status"], string> = {
   expired: "Kedaluwarsa",
 };
 
-export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
+export function TodayTaskCard({ task, onChanged }: { task: TaskOverviewItem; onChanged?: () => void }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showDetail, setShowDetail] = useState(false);
@@ -34,6 +34,7 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
         return;
       }
       toast.success("Task disetujui! Saldo, point, dan XP sudah ditambahkan.");
+      onChanged?.();
     });
   };
 
@@ -47,6 +48,7 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
       }
       toast.success(`${task.type === "tugas" ? "Tugas" : "Task"} ditolak, anak perlu mengerjakan ulang.`);
       setConfirmReject(false);
+      onChanged?.();
     });
   };
 
@@ -60,6 +62,7 @@ export function TodayTaskCard({ task }: { task: TaskOverviewItem }) {
       }
       toast.success(`${task.type === "tugas" ? "Tugas" : "Task"} dihapus.`);
       router.refresh();
+      onChanged?.();
     });
   };
 

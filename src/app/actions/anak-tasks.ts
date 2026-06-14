@@ -8,7 +8,7 @@ import { applyXpGain } from "@/lib/dunia-anak";
 import { unlockAssetsForProfile } from "@/lib/server/assets";
 import { pushNotification } from "@/lib/server/notifications";
 import { syncSavingsPocket } from "@/lib/server/child-savings";
-import { computeWeeklyStreak } from "@/app/actions/anak-overview";
+import { computeWeeklyStreak, type TaskOverviewItem } from "@/app/actions/anak-overview";
 import { currentMonth, monthRange } from "@/lib/finance";
 import { formatRupiah, todayISODate } from "@/lib/format";
 import { REWARD, findTaskCategory } from "@/lib/constants";
@@ -242,6 +242,42 @@ export async function getTaskCountsForDate(childId: string, date: string): Promi
     taskCount: (data ?? []).filter((t) => t.type === "task").length,
     tugasCount: (data ?? []).filter((t) => t.type === "tugas").length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Task/tugas pada tanggal tertentu (untuk filter "Task & Tugas Hari Ini")
+// ---------------------------------------------------------------------------
+
+export async function getTasksForDate(childId: string, date: string): Promise<TaskOverviewItem[]> {
+  const session = await requireAdmin();
+  if (!session) return [];
+
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("tasks")
+    .select(
+      "id, type, title, description, image_url, category, reward_money, reward_point, reward_xp, status, questions, user_answers, score, submitted_at"
+    )
+    .eq("profile_id", childId)
+    .eq("day_date", date)
+    .order("created_at", { ascending: true });
+
+  return (data ?? []).map((t) => ({
+    id: t.id,
+    type: t.type,
+    title: t.title,
+    description: t.description,
+    imageUrl: t.image_url,
+    category: t.category,
+    rewardMoney: Number(t.reward_money),
+    rewardPoint: t.reward_point,
+    rewardXp: t.reward_xp,
+    status: t.status,
+    questions: t.questions,
+    userAnswers: t.user_answers,
+    score: t.score,
+    submittedAt: t.submitted_at,
+  }));
 }
 
 // ---------------------------------------------------------------------------
