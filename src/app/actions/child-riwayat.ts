@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireChild } from "@/lib/server/child-helpers";
+import { formatRupiah } from "@/lib/format";
 import type { SaldoTransactionType } from "@/lib/supabase/types";
 
 export type RiwayatCategory = "tugas" | "tarik_dana" | "investasi" | "streak" | "point_shop";
@@ -69,6 +70,28 @@ export async function getChildRiwayat(childId: string, filter: RiwayatFilter = "
         amountMoney: Number(t.amount),
         amountPoint: null,
         date: t.created_at,
+      });
+    });
+  }
+
+  if (filter === "semua" || filter === "tarik_dana") {
+    const { data: rejected } = await supabase
+      .from("withdrawal_requests")
+      .select("id, amount, reviewed_at, requested_at, note")
+      .eq("profile_id", childId)
+      .eq("status", "rejected")
+      .order("requested_at", { ascending: false })
+      .limit(50);
+
+    (rejected ?? []).forEach((w) => {
+      items.push({
+        id: w.id,
+        category: "tarik_dana",
+        title: `Tarik Dana Ditolak (${formatRupiah(Number(w.amount))})`,
+        note: w.note,
+        amountMoney: null,
+        amountPoint: null,
+        date: w.reviewed_at ?? w.requested_at,
       });
     });
   }
