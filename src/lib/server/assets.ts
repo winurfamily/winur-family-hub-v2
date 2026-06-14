@@ -36,6 +36,41 @@ export async function backfillAssetUnlock(
   }
 }
 
+/**
+ * Cabut akses avatar/pet dari anak yang levelnya belum mencapai unlockLevel terbaru
+ * (dipanggil saat admin MENAIKKAN unlock_level lewat halaman Assets). Tanpa ini,
+ * baris profile_avatars/profile_pets yang sudah ter-backfill saat unlock_level
+ * masih 1 (default) membuat avatar/pet tetap terbuka selamanya walau levelnya
+ * dinaikkan belakangan. Reset avatar/pet aktif anak yang dicabut ke null.
+ */
+export async function relockAssetForProfiles(
+  supabase: AdminClient,
+  familyId: string,
+  assetType: "avatar" | "pet",
+  assetId: string,
+  unlockLevel: number
+): Promise<void> {
+  const { data: children } = await supabase
+    .from("profiles")
+    .select("id, level, active_avatar_id, active_pet_id")
+    .eq("family_id", familyId)
+    .eq("role", "child")
+    .lt("level", unlockLevel);
+
+  if (!children || children.length === 0) return;
+  const childIds = children.map((c) => c.id);
+
+  if (assetType === "avatar") {
+    await supabase.from("profile_avatars").delete().eq("avatar_id", assetId).in("profile_id", childIds);
+    const resetIds = children.filter((c) => c.active_avatar_id === assetId).map((c) => c.id);
+    if (resetIds.length > 0) await supabase.from("profiles").update({ active_avatar_id: null }).in("id", resetIds);
+  } else {
+    await supabase.from("profile_pets").delete().eq("pet_id", assetId).in("profile_id", childIds);
+    const resetIds = children.filter((c) => c.active_pet_id === assetId).map((c) => c.id);
+    if (resetIds.length > 0) await supabase.from("profiles").update({ active_pet_id: null }).in("id", resetIds);
+  }
+}
+
 export interface UnlockedAsset {
   id: string;
   name: string;

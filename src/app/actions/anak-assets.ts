@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, logAudit, type ActionResult } from "@/lib/server/admin-helpers";
-import { backfillAssetUnlock } from "@/lib/server/assets";
+import { backfillAssetUnlock, relockAssetForProfiles } from "@/lib/server/assets";
 import { generateAndStoreBackground, hasOpenAIKey } from "@/lib/ai";
 import type { AvatarInput, PetInput } from "@/lib/validation/dunia-anak";
 
@@ -194,11 +194,12 @@ export async function updateAvatarUnlockLevel(avatarId: string, unlockLevel: num
   if (!session) return { success: false, error: "Tidak diizinkan." };
 
   const supabase = createAdminClient();
-  const { data: avatar } = await supabase.from("avatars").select("id, family_id, unlock_level").eq("id", avatarId).maybeSingle();
+  const { data: avatar } = await supabase.from("avatars").select("id, family_id, unlock_level, is_default").eq("id", avatarId).maybeSingle();
   if (!avatar || avatar.family_id !== session.familyId) return { success: false, error: "Avatar tidak ditemukan." };
 
   await supabase.from("avatars").update({ unlock_level: unlockLevel }).eq("id", avatarId);
   await backfillAssetUnlock(supabase, session.familyId, "avatar", avatarId, unlockLevel);
+  if (!avatar.is_default) await relockAssetForProfiles(supabase, session.familyId, "avatar", avatarId, unlockLevel);
 
   await logAudit(
     supabase,
@@ -287,6 +288,7 @@ export async function updatePetUnlockLevel(petId: string, unlockLevel: number): 
 
   await supabase.from("pets").update({ unlock_level: unlockLevel }).eq("id", petId);
   await backfillAssetUnlock(supabase, session.familyId, "pet", petId, unlockLevel);
+  await relockAssetForProfiles(supabase, session.familyId, "pet", petId, unlockLevel);
 
   await logAudit(
     supabase,
