@@ -18,17 +18,19 @@ export function TransferForm({ pockets }: { pockets: PocketSummary[] }) {
 
   const form = useForm<z.input<typeof transferSchema>, unknown, TransferInput>({
     resolver: zodResolver(transferSchema),
-    defaultValues: { fromType: "main", fromPocketId: "", toPocketId: "", amount: 0, note: "" },
+    defaultValues: { fromType: "main", fromPocketId: "", toType: "pocket", toPocketId: "", amount: 0, note: "" },
   });
 
   const fromType = form.watch("fromType");
+  const toType = form.watch("toType");
 
   const onSubmit = (values: TransferInput) => {
     startTransition(async () => {
       const result = await transferPocket({
         fromType: values.fromType,
         fromPocketId: values.fromType === "pocket" ? values.fromPocketId : undefined,
-        toPocketId: values.toPocketId,
+        toType: values.toType,
+        toPocketId: values.toType === "pocket" ? values.toPocketId : undefined,
         amount: values.amount,
         note: values.note,
       });
@@ -39,7 +41,7 @@ export function TransferForm({ pockets }: { pockets: PocketSummary[] }) {
       }
 
       toast.success("Transfer berhasil.");
-      form.reset({ fromType: "main", fromPocketId: "", toPocketId: "", amount: 0, note: "" });
+      form.reset({ fromType: "main", fromPocketId: "", toType: "pocket", toPocketId: "", amount: 0, note: "" });
     });
   };
 
@@ -50,7 +52,7 @@ export function TransferForm({ pockets }: { pockets: PocketSummary[] }) {
         className="space-y-3 rounded-2xl border-2 border-border bg-card shadow-card p-4"
       >
         <h2 className="font-heading font-extrabold text-ink-1 flex items-center gap-2">
-          <ArrowRightLeft className="w-5 h-5 text-accent" /> Transfer Antar Pocket
+          <ArrowRightLeft className="w-5 h-5 text-accent" /> Transfer / Pengeluaran
         </h2>
 
         <FormField
@@ -110,28 +112,58 @@ export function TransferForm({ pockets }: { pockets: PocketSummary[] }) {
 
         <FormField
           control={form.control}
-          name="toPocketId"
+          name="toType"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Ke Pocket</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value}>
+              <FormLabel>Ke</FormLabel>
+              <Select
+                onValueChange={(value) => {
+                  field.onChange(value);
+                  form.setValue("toPocketId", "");
+                }}
+                value={field.value}
+              >
                 <FormControl>
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih pocket tujuan" />
+                    <SelectValue />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  {pockets.map((pocket) => (
-                    <SelectItem key={pocket.id} value={pocket.id}>
-                      {pocket.name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="pocket">Pocket</SelectItem>
+                  <SelectItem value="external">Luar Pocket (Pengeluaran)</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
             </FormItem>
           )}
         />
+
+        {toType === "pocket" && (
+          <FormField
+            control={form.control}
+            name="toPocketId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Ke Pocket</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih pocket tujuan" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {pockets.map((pocket) => (
+                      <SelectItem key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <FormField
           control={form.control}
@@ -152,9 +184,12 @@ export function TransferForm({ pockets }: { pockets: PocketSummary[] }) {
           name="note"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Catatan (opsional)</FormLabel>
+              <FormLabel>{toType === "external" ? "Untuk apa" : "Catatan (opsional)"}</FormLabel>
               <FormControl>
-                <Input placeholder="Catatan tambahan" {...field} />
+                <Input
+                  placeholder={toType === "external" ? "Contoh: Bayar listrik, kasih ke Nenek, dll" : "Catatan tambahan"}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>

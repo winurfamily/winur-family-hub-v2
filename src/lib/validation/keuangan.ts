@@ -17,7 +17,8 @@ export const transferSchema = z
   .object({
     fromType: z.enum(["main", "pocket"]),
     fromPocketId: z.string().optional(),
-    toPocketId: z.string().min(1, "Pilih pocket tujuan"),
+    toType: z.enum(["pocket", "external"]),
+    toPocketId: z.string().optional(),
     amount: z.coerce.number().positive("Nominal harus lebih dari 0"),
     note: z.string().max(200).optional(),
   })
@@ -25,9 +26,20 @@ export const transferSchema = z
     message: "Pilih pocket asal",
     path: ["fromPocketId"],
   })
-  .refine((data) => data.fromType === "main" || data.fromPocketId !== data.toPocketId, {
-    message: "Pocket asal dan tujuan tidak boleh sama",
+  .refine((data) => data.toType === "external" || !!data.toPocketId, {
+    message: "Pilih pocket tujuan",
     path: ["toPocketId"],
+  })
+  .refine(
+    (data) => data.toType === "external" || data.fromType === "main" || data.fromPocketId !== data.toPocketId,
+    {
+      message: "Pocket asal dan tujuan tidak boleh sama",
+      path: ["toPocketId"],
+    }
+  )
+  .refine((data) => data.toType !== "external" || !!data.note?.trim(), {
+    message: "Isi untuk apa transfer ini",
+    path: ["note"],
   });
 export type TransferInput = z.infer<typeof transferSchema>;
 

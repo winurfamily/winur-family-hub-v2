@@ -421,7 +421,8 @@ export async function withdrawPocketBalance(id: string): Promise<ActionResult> {
 export interface TransferPocketInput {
   fromType: "main" | "pocket";
   fromPocketId?: string;
-  toPocketId: string;
+  toType: "pocket" | "external";
+  toPocketId?: string;
   amount: number;
   note?: string;
 }
@@ -433,7 +434,17 @@ export async function transferPocket(input: TransferPocketInput): Promise<Action
   if (!Number.isFinite(input.amount) || input.amount <= 0) {
     return { success: false, error: "Nominal harus lebih dari 0." };
   }
-  if (input.fromType === "pocket" && (!input.fromPocketId || input.fromPocketId === input.toPocketId)) {
+  if (input.toType === "external" && !input.note?.trim()) {
+    return { success: false, error: "Isi untuk apa transfer ini." };
+  }
+  if (input.toType === "pocket" && !input.toPocketId) {
+    return { success: false, error: "Pilih pocket tujuan." };
+  }
+  if (
+    input.toType === "pocket" &&
+    input.fromType === "pocket" &&
+    (!input.fromPocketId || input.fromPocketId === input.toPocketId)
+  ) {
     return { success: false, error: "Pocket asal dan tujuan tidak boleh sama." };
   }
 
@@ -460,15 +471,18 @@ export async function transferPocket(input: TransferPocketInput): Promise<Action
     }
   }
 
-  const { data: toPocketData } = await supabase
-    .from("pockets")
-    .select("id, name, balance")
-    .eq("id", input.toPocketId)
-    .eq("family_id", session.familyId)
-    .maybeSingle();
+  let toPocket: { id: string; name: string; balance: number } | null = null;
+  if (input.toType === "pocket") {
+    const { data: toPocketData } = await supabase
+      .from("pockets")
+      .select("id, name, balance")
+      .eq("id", input.toPocketId!)
+      .eq("family_id", session.familyId)
+      .maybeSingle();
 
-  if (!toPocketData) return { success: false, error: "Pocket tujuan tidak ditemukan." };
-  const toPocket = { id: toPocketData.id, name: toPocketData.name, balance: Number(toPocketData.balance) };
+    if (!toPocketData) return { success: false, error: "Pocket tujuan tidak ditemukan." };
+    toPocket = { id: toPocketData.id, name: toPocketData.name, balance: Number(toPocketData.balance) };
+  }
 
   const { data: transfer, error } = await supabase
     .from("pocket_transfers")
@@ -476,7 +490,8 @@ export async function transferPocket(input: TransferPocketInput): Promise<Action
       family_id: session.familyId,
       from_type: input.fromType,
       from_pocket_id: input.fromType === "pocket" ? input.fromPocketId : null,
-      to_pocket_id: input.toPocketId,
+      to_type: input.toType,
+      to_pocket_id: input.toType === "pocket" ? input.toPocketId : null,
       amount: input.amount,
       note: input.note?.trim() || null,
       created_by: session.profileId,
@@ -494,15 +509,17 @@ export async function transferPocket(input: TransferPocketInput): Promise<Action
     }, { balance: newBalance });
   }
 
-  const newToBalance = toPocket.balance + input.amount;
-  await supabase.from("pockets").update({ balance: newToBalance }).eq("id", toPocket.id);
-  await logAudit(supabase, session.familyId, session.profileId, "pocket", toPocket.id, "transfer_in", {
-    balance: toPocket.balance,
-  }, { balance: newToBalance });
+  if (toPocket) {
+    const newToBalance = toPocket.balance + input.amount;
+    await supabase.from("pockets").update({ balance: newToBalance }).eq("id", toPocket.id);
+    await logAudit(supabase, session.familyId, session.profileId, "pocket", toPocket.id, "transfer_in", {
+      balance: toPocket.balance,
+    }, { balance: newToBalance });
+  }
 
   revalidateKeuangan();
   if (fromPocket) await revalidateChildSavingsPocket(supabase, session.familyId, fromPocket.name);
-  await revalidateChildSavingsPocket(supabase, session.familyId, toPocket.name);
+  if (toPocket) await revalidateChildSavingsPocket(supabase, session.familyId, toPocket.name);
   return { success: true };
 }
 
@@ -551,7 +568,12 @@ export async function getTransferHistory(page = 1, pageSize = 20): Promise<Trans
   const items: TransferHistoryItem[] = data.map((row) => ({
     id: row.id,
     fromLabel: row.from_type === "main" ? "Saldo Utama" : nameMap.get(row.from_pocket_id ?? "") ?? "Pocket",
-    toLabel: row.to_type === "main" ? "Saldo Utama" : nameMap.get(row.to_pocket_id ?? "") ?? "Pocket",
+    toLabel:
+      row.to_type === "main"
+        ? "Saldo Utama"
+        : row.to_type === "external"
+          ? "Luar Pocket"
+          : nameMap.get(row.to_pocket_id ?? "") ?? "Pocket",
     amount: Number(row.amount),
     note: row.note,
     createdAt: row.created_at,

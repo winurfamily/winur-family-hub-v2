@@ -21,7 +21,7 @@ export type TaskStatus =
   | "expired";
 export type PocketType = "default" | "custom";
 export type PocketTransferFromType = "main" | "pocket";
-export type PocketTransferToType = "main" | "pocket";
+export type PocketTransferToType = "main" | "pocket" | "external";
 export type InvestmentStatus = "active" | "completed" | "confirmed";
 export type WithdrawalStatus = "pending" | "approved" | "rejected";
 export type PointRequestStatus = "pending" | "approved" | "rejected";
