@@ -55,7 +55,7 @@ export async function getAvailableThemes(childId: string): Promise<AvailableThem
   }));
 
   return {
-    activeThemeKey: profile.active_theme_key ?? getDefaultThemeKey(kind),
+    activeThemeKey: profile.active_theme_key ?? getDefaultThemeKey(),
     themes: [...builtin, ...customThemes],
   };
 }
@@ -170,7 +170,7 @@ export async function getRoomThemesByChild(): Promise<ChildRoomThemes[]> {
 
   return children.map((c) => {
     const kind = deriveKind(c.name, c.age);
-    const defaultThemeKey = getDefaultThemeKey(kind);
+    const defaultThemeKey = getDefaultThemeKey();
     return {
       childId: c.id,
       childName: c.name,

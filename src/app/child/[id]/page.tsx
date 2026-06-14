@@ -17,11 +17,11 @@ export default async function ChildWorldPage({ params }: { params: { id: string 
   const activeAvatar = collections?.avatars.find((a) => a.active);
 
   const kind = deriveKind(profile.name, profile.age);
-  const themeKey = profile.activeThemeKey ?? getDefaultThemeKey(kind);
+  const themeKey = profile.activeThemeKey ?? getDefaultThemeKey();
   // Tema bawaan langsung dari kode; selain itu coba tema custom (upload admin),
   // fallback ke tema default bila tidak ditemukan.
   const theme =
-    BUILTIN_THEMES[themeKey] ?? (await getCustomRoomTheme(params.id, themeKey)) ?? BUILTIN_THEMES[getDefaultThemeKey(kind)];
+    BUILTIN_THEMES[themeKey] ?? (await getCustomRoomTheme(params.id, themeKey)) ?? BUILTIN_THEMES[getDefaultThemeKey()];
 
   return (
     <ChildWorld

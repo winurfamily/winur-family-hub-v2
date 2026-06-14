@@ -122,10 +122,6 @@ export function makeRoomTheme(
   };
 }
 
-function builtinTheme(key: string, name: string, forKind: ("daffa" | "dio")[]): RoomTheme {
-  return makeRoomTheme(key, name, `/themes/${key}-siang.webp`, `/themes/${key}-malam.webp`, forKind);
-}
-
 /** Tema "roket": gambar 16:10 1586x992 + kalibrasi hotspot/walkable/posisi sendiri. */
 function roketTheme(): RoomTheme {
   return {
@@ -145,12 +141,11 @@ function roketTheme(): RoomTheme {
 
 export const BUILTIN_THEMES: Record<string, RoomTheme> = {
   roket: roketTheme(),
-  minecraft: builtinTheme("minecraft", "Minecraft", ["daffa"]),
-  tayo: builtinTheme("tayo", "Tayo", ["dio"]),
 };
 
-export function getDefaultThemeKey(kind: "daffa" | "dio"): string {
-  return kind === "daffa" ? "roket" : "tayo";
+/** Satu-satunya tema bawaan dengan asset gambar nyata (lihat public/themes); dipakai sbg fallback. */
+export function getDefaultThemeKey(): string {
+  return "roket";
 }
 
 export function getThemesForKind(kind: "daffa" | "dio"): RoomTheme[] {
