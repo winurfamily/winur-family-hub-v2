@@ -19,8 +19,13 @@ export function TemaSheet({ childId, onClose, onChanged }: Props) {
   const load = () => void getAvailableThemes(childId).then(setData);
   useEffect(load, [childId]);
 
-  const pick = (key: string) => {
+  const pick = (key: string, unlocked: boolean, unlockLevel: number) => {
     if (!data || key === data.activeThemeKey) return;
+    if (!unlocked) {
+      soundManager.play("tap");
+      toast.error(`Naik ke level ${unlockLevel} dulu untuk membuka tema ini!`);
+      return;
+    }
     startTransition(async () => {
       const res = await setActiveTheme(childId, key);
       if (res.success) {
@@ -49,16 +54,21 @@ export function TemaSheet({ childId, onClose, onChanged }: Props) {
                 key={t.key}
                 type="button"
                 disabled={isPending}
-                onClick={() => pick(t.key)}
+                onClick={() => pick(t.key, t.unlocked, t.unlockLevel)}
                 className={`relative overflow-hidden rounded-[16px] border-[3px] text-left transition-transform active:scale-95 ${
                   active ? "border-[#4A8C3F]" : "border-[#E3E8F0]"
-                }`}
+                } ${t.unlocked ? "" : "opacity-55 grayscale"}`}
               >
+                {!t.unlocked && <span className="absolute right-2 top-1.5 text-[14px]">🔒</span>}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={t.dayImage} alt={t.name} className="aspect-video w-full object-cover" />
                 <div className="flex items-center justify-between gap-1 bg-white px-2.5 py-2">
                   <span className="truncate text-[12px] font-black text-[#3D5A80]">{t.name}</span>
-                  {active && <span className="text-[10px] font-black text-[#4A8C3F]">✓ Aktif</span>}
+                  {active ? (
+                    <span className="text-[10px] font-black text-[#4A8C3F]">✓ Aktif</span>
+                  ) : !t.unlocked ? (
+                    <span className="text-[10px] font-black text-[#9AA0AE]">Lv.{t.unlockLevel}</span>
+                  ) : null}
                 </div>
               </button>
             );

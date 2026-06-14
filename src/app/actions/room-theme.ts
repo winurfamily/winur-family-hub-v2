@@ -14,6 +14,8 @@ export interface RoomThemeOption {
   name: string;
   dayImage: string;
   isCustom: boolean;
+  unlockLevel: number;
+  unlocked: boolean;
 }
 
 export interface AvailableThemes {
@@ -29,7 +31,7 @@ export async function getAvailableThemes(childId: string): Promise<AvailableThem
   const supabase = createAdminClient();
   const { data: profile } = await supabase
     .from("profiles")
-    .select("name, age, active_theme_key")
+    .select("name, age, level, active_theme_key")
     .eq("id", childId)
     .maybeSingle();
   if (!profile) return null;
@@ -40,11 +42,13 @@ export async function getAvailableThemes(childId: string): Promise<AvailableThem
     name: t.name,
     dayImage: t.dayImage,
     isCustom: false,
+    unlockLevel: 1,
+    unlocked: true,
   }));
 
   const { data: custom } = await supabase
     .from("room_themes")
-    .select("id, name, day_image_url")
+    .select("id, name, day_image_url, unlock_level")
     .eq("owner_profile_id", childId);
 
   const customThemes: RoomThemeOption[] = (custom ?? []).map((c) => ({
@@ -52,6 +56,8 @@ export async function getAvailableThemes(childId: string): Promise<AvailableThem
     name: c.name,
     dayImage: c.day_image_url,
     isCustom: true,
+    unlockLevel: c.unlock_level,
+    unlocked: c.unlock_level <= profile.level,
   }));
 
   return {
@@ -68,10 +74,16 @@ export async function setActiveTheme(childId: string, themeKey: string): Promise
   const supabase = createAdminClient();
   const { data: profile } = await supabase
     .from("profiles")
-    .select("family_id, active_theme_key")
+    .select("family_id, level, active_theme_key")
     .eq("id", childId)
     .maybeSingle();
   if (!profile) return { success: false, error: "Profil tidak ditemukan." };
+
+  if (!(themeKey in BUILTIN_THEMES)) {
+    const { data: theme } = await supabase.from("room_themes").select("id, unlock_level").eq("id", themeKey).eq("owner_profile_id", childId).maybeSingle();
+    if (!theme) return { success: false, error: "Tema tidak ditemukan." };
+    if (theme.unlock_level > profile.level) return { success: false, error: "Tema ini masih terkunci." };
+  }
 
   const { error } = await supabase.from("profiles").update({ active_theme_key: themeKey }).eq("id", childId);
   if (error) {
@@ -117,6 +129,7 @@ export interface CustomRoomThemeItem {
   name: string;
   dayImageUrl: string;
   nightImageUrl: string;
+  unlockLevel: number;
 }
 
 export interface ChildRoomThemes {
@@ -134,6 +147,7 @@ export interface CreateRoomThemeInput {
   name: string;
   dayImageUrl: string;
   nightImageUrl?: string | null;
+  unlockLevel?: number;
   setActive?: boolean;
 }
 
@@ -164,7 +178,7 @@ export async function getRoomThemesByChild(): Promise<ChildRoomThemes[]> {
   const childIds = children.map((c) => c.id);
   const { data: themes } = await supabase
     .from("room_themes")
-    .select("id, owner_profile_id, name, day_image_url, night_image_url")
+    .select("id, owner_profile_id, name, day_image_url, night_image_url, unlock_level")
     .in("owner_profile_id", childIds)
     .order("created_at", { ascending: true });
 
@@ -180,7 +194,7 @@ export async function getRoomThemesByChild(): Promise<ChildRoomThemes[]> {
       builtinThemes: getThemesForKind(kind).map((t) => ({ key: t.key, name: t.name, dayImage: t.dayImage })),
       customThemes: (themes ?? [])
         .filter((t) => t.owner_profile_id === c.id)
-        .map((t) => ({ id: t.id, name: t.name, dayImageUrl: t.day_image_url, nightImageUrl: t.night_image_url })),
+        .map((t) => ({ id: t.id, name: t.name, dayImageUrl: t.day_image_url, nightImageUrl: t.night_image_url, unlockLevel: t.unlock_level })),
     };
   });
 }
@@ -232,6 +246,7 @@ export async function createRoomTheme(input: CreateRoomThemeInput): Promise<{ su
   if (!child || child.family_id !== session.familyId) return { success: false, error: "Profil anak tidak ditemukan." };
 
   const nightImageUrl = input.nightImageUrl || input.dayImageUrl;
+  const unlockLevel = input.unlockLevel && input.unlockLevel > 0 ? input.unlockLevel : 1;
   const { data: inserted, error } = await supabase
     .from("room_themes")
     .insert({
@@ -240,6 +255,7 @@ export async function createRoomTheme(input: CreateRoomThemeInput): Promise<{ su
       day_image_url: input.dayImageUrl,
       night_image_url: nightImageUrl,
       config: { layout: "shared-v1" },
+      unlock_level: unlockLevel,
     })
     .select("id")
     .single();
@@ -258,6 +274,39 @@ export async function createRoomTheme(input: CreateRoomThemeInput): Promise<{ su
   revalidatePath("/admin/dunia-anak/assets");
   revalidatePath(`/child/${input.childId}`);
   return { success: true, themeId: inserted.id };
+}
+
+/** Ubah level unlock tema kamar custom. */
+export async function updateRoomThemeUnlockLevel(themeId: string, unlockLevel: number): Promise<ActionResult> {
+  const session = await requireAdmin();
+  if (!session) return { success: false, error: "Tidak diizinkan." };
+
+  const supabase = createAdminClient();
+  const { data: theme } = await supabase.from("room_themes").select("id, owner_profile_id, unlock_level").eq("id", themeId).maybeSingle();
+  if (!theme) return { success: false, error: "Tema tidak ditemukan." };
+
+  const { data: owner } = await supabase.from("profiles").select("family_id").eq("id", theme.owner_profile_id).maybeSingle();
+  if (!owner || owner.family_id !== session.familyId) return { success: false, error: "Tema tidak ditemukan." };
+
+  const { error } = await supabase.from("room_themes").update({ unlock_level: unlockLevel }).eq("id", themeId);
+  if (error) {
+    console.error("updateRoomThemeUnlockLevel error", error);
+    return { success: false, error: "Gagal menyimpan level unlock." };
+  }
+
+  await logAudit(
+    supabase,
+    session.familyId,
+    session.profileId,
+    "room_themes",
+    themeId,
+    "update_unlock_level",
+    { unlock_level: theme.unlock_level },
+    { unlock_level: unlockLevel }
+  );
+
+  revalidatePath("/admin/dunia-anak/assets");
+  return { success: true };
 }
 
 /** Hapus tema custom; jika sedang aktif, kembalikan anak ke tema default. */

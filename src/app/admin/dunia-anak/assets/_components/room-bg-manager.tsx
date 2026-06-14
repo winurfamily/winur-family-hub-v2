@@ -11,6 +11,7 @@ import {
   adminSetActiveTheme,
   createRoomTheme,
   deleteRoomTheme,
+  updateRoomThemeUnlockLevel,
   uploadRoomThemeImage,
   type ChildRoomThemes,
 } from "@/app/actions/room-theme";
@@ -91,6 +92,7 @@ function ChildRoomCard({ data }: { data: ChildRoomThemes }) {
             disabled={isSettingActive}
             onUse={() => setActive(c.id)}
             themeId={c.id}
+            unlockLevel={c.unlockLevel}
             onDeleted={() => router.refresh()}
           />
         ))}
@@ -122,6 +124,7 @@ function ThemeThumb({
   disabled,
   onUse,
   themeId,
+  unlockLevel,
   onDeleted,
 }: {
   img: string;
@@ -131,10 +134,13 @@ function ThemeThumb({
   disabled?: boolean;
   onUse: () => void;
   themeId?: string;
+  unlockLevel?: number;
   onDeleted?: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isDeleting, startDelete] = useTransition();
+  const [level, setLevel] = useState(unlockLevel ?? 1);
+  const [isSavingLevel, startSaveLevel] = useTransition();
 
   const handleDelete = () => {
     if (!themeId) return;
@@ -147,6 +153,18 @@ function ThemeThumb({
       }
       toast.success("Background dihapus.");
       onDeleted?.();
+    });
+  };
+
+  const handleSaveLevel = () => {
+    if (!themeId) return;
+    startSaveLevel(async () => {
+      const res = await updateRoomThemeUnlockLevel(themeId, level);
+      if (!res.success) {
+        toast.error(res.error ?? "Gagal menyimpan level unlock.");
+        return;
+      }
+      toast.success("Level unlock disimpan.");
     });
   };
 
@@ -172,6 +190,26 @@ function ThemeThumb({
           >
             Pakai tema ini
           </button>
+        )}
+        {themeId && (
+          <div className="mt-1.5 flex items-center gap-1 border-t border-border pt-1.5">
+            <span className="text-[9px] font-bold text-ink-3">Unlock Lv.</span>
+            <Input
+              type="number"
+              min={1}
+              value={level}
+              onChange={(e) => setLevel(Number(e.target.value) || 1)}
+              className="h-6 w-12 px-1 text-center text-[10px]"
+            />
+            <button
+              type="button"
+              onClick={handleSaveLevel}
+              disabled={isSavingLevel || level === unlockLevel}
+              className="text-[9px] font-black text-accent disabled:opacity-40"
+            >
+              Simpan
+            </button>
+          </div>
         )}
       </div>
 
@@ -203,6 +241,7 @@ function AddBackgroundForm({ childId, onDone, onCancel }: { childId: string; onD
   const [name, setName] = useState("");
   const [dayUrl, setDayUrl] = useState<string | null>(null);
   const [nightUrl, setNightUrl] = useState<string | null>(null);
+  const [unlockLevel, setUnlockLevel] = useState(1);
   const [makeActive, setMakeActive] = useState(true);
   const [uploadingDay, startDay] = useTransition();
   const [uploadingNight, startNight] = useTransition();
@@ -241,7 +280,7 @@ function AddBackgroundForm({ childId, onDone, onCancel }: { childId: string; onD
       return;
     }
     startSave(async () => {
-      const res = await createRoomTheme({ childId, name: name.trim(), dayImageUrl: dayUrl, nightImageUrl: nightUrl, setActive: makeActive });
+      const res = await createRoomTheme({ childId, name: name.trim(), dayImageUrl: dayUrl, nightImageUrl: nightUrl, unlockLevel, setActive: makeActive });
       if (!res.success) {
         toast.error(res.error ?? "Gagal menyimpan background.");
         return;
@@ -253,9 +292,15 @@ function AddBackgroundForm({ childId, onDone, onCancel }: { childId: string; onD
 
   return (
     <div className="space-y-3 rounded-xl border-2 border-border bg-surface-2 p-3">
-      <div className="space-y-1">
-        <Label>Nama Tema</Label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Kamar Luar Angkasa" />
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label>Nama Tema</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Kamar Luar Angkasa" />
+        </div>
+        <div className="space-y-1">
+          <Label>Unlock di Level</Label>
+          <Input type="number" min={1} value={unlockLevel} onChange={(e) => setUnlockLevel(Number(e.target.value) || 1)} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

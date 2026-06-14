@@ -99,6 +99,7 @@ export type RoomThemeRow = {
   day_image_url: string;
   night_image_url: string;
   config: Record<string, unknown>;
+  unlock_level: number;
   created_at: string;
 };
 
