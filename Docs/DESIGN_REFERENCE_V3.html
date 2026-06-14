@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Winur Family Hub — Design V3 "Satu Rumah, Dua Dunia"</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+:root{
+--adm-bg:#F4F5F7;--adm-surface:#FFFFFF;--adm-alt:#ECEEF2;--adm-t1:#1C1E26;--adm-t2:#5A5F6E;--adm-t3:#9AA0AE;
+--c-orange:#FF6B35;--c-orange-d:#E8561F;--c-green:#4CAF50;--c-green-d:#388E3C;--c-purple:#7C3AED;--c-blue:#1976D2;--c-yellow:#FFD93D;--c-yellow-d:#F4C00A;--c-pink:#FF6B9D;
+--daffa:#4CAF50;--dio:#7C3AED;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#1a1d24;color:#fff;padding:20px}
+h1,h2,h3,.nun{font-family:'Nunito',sans-serif}
+.wrap{max-width:1280px;margin:0 auto}
+.intro{text-align:center;margin-bottom:20px}
+.intro h1{font-size:26px;font-weight:900;color:var(--c-yellow)}
+.intro p{font-size:13px;color:#8b93a5;margin-top:4px}
+/* screen switcher */
+.tabs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
+.tab{background:#2a2f3a;border:2px solid transparent;color:#8b93a5;border-radius:12px;padding:9px 16px;font-family:'Nunito',sans-serif;font-weight:800;font-size:13px;cursor:pointer;transition:all .15s}
+.tab.on{background:var(--c-orange);color:#fff}
+.screen{display:none}
+.screen.on{display:block}
+/* tablet frame */
+.frame{background:#000;border-radius:28px;padding:14px;max-width:1180px;margin:0 auto;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+.viewport{border-radius:18px;overflow:hidden;aspect-ratio:16/10;position:relative}
+.cap{ text-align:center;font-size:12px;color:#6b7280;margin-top:10px;max-width:900px;margin-left:auto;margin-right:auto}
+
+/* ============ PROFILE PICKER ============ */
+.pk{height:100%;background:linear-gradient(180deg,#7BB8E8 0%,#A8D4F0 35%,#C8E8C0 75%,#9BC88F 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.pk-house{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:480px;height:200px;background:linear-gradient(#E8D5B7,#D4BFA0);border-radius:20px 20px 0 0;opacity:.5}
+.pk-roof{position:absolute;bottom:185px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:270px solid transparent;border-right:270px solid transparent;border-bottom:90px solid rgba(196,98,86,.5)}
+.pk-cloud{position:absolute;background:rgba(255,255,255,.8);border-radius:999px;animation:drift 30s linear infinite}
+@keyframes drift{from{transform:translateX(-150px)}to{transform:translateX(1300px)}}
+.pk-logo{font-family:'Nunito',sans-serif;font-weight:900;font-size:34px;color:#fff;text-shadow:0 3px 0 rgba(0,0,0,.15);z-index:2}
+.pk-sub{font-size:13px;color:rgba(255,255,255,.95);margin-bottom:26px;z-index:2;font-weight:600}
+.pk-cards{display:flex;gap:18px;z-index:2}
+.pk-card{width:150px;border-radius:22px;padding:18px 14px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.pk-card:hover{transform:translateY(-8px) scale(1.03)}
+.pk-card.adm{background:#fff;box-shadow:0 10px 30px rgba(28,30,38,.18)}
+.pk-card.kid{box-shadow:0 10px 30px rgba(0,0,0,.2)}
+.pk-card.kid.daffa{background:linear-gradient(170deg,#E8F5E9,#fff);border:3px solid var(--daffa)}
+.pk-card.kid.dio{background:linear-gradient(170deg,#EDE9FE,#fff);border:3px solid var(--dio)}
+.pk-av{width:74px;height:74px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:36px}
+.pk-name{font-family:'Nunito',sans-serif;font-weight:900;font-size:17px;color:#1C1E26}
+.pk-role{font-size:10px;font-weight:800;border-radius:999px;padding:3px 11px;margin-top:6px;display:inline-block;color:#fff}
+.pk-lv{font-size:11px;color:#5A5F6E;margin-top:5px;font-weight:700}
+
+/* ============ ADMIN HOME ============ */
+.ah{height:100%;background:var(--adm-bg);color:var(--adm-t1);padding:22px 26px;display:flex;flex-direction:column;gap:16px;overflow:hidden}
+.ah-top{display:flex;justify-content:space-between;align-items:center}
+.ah-hi{font-family:'Nunito',sans-serif;font-weight:900;font-size:21px}
+.ah-hi small{display:block;font-size:11px;color:var(--adm-t3);font-weight:600;font-family:'Plus Jakarta Sans'}
+.ah-right{display:flex;gap:10px;align-items:center}
+.ah-ic{width:38px;height:38px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(28,30,38,.06);position:relative;font-size:16px}
+.ah-badge{position:absolute;top:-4px;right:-4px;background:var(--c-orange);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:999px}
+.hero{background:linear-gradient(120deg,#1C1E26,#343948);border-radius:22px;padding:18px 24px;color:#fff;display:flex;justify-content:space-between;align-items:center}
+.hero-l small{font-size:11px;color:#9AA0AE;font-weight:600}
+.hero-l .amt{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:30px;margin-top:2px}
+.hero-r{display:flex;gap:22px;align-items:center}
+.hero-kid{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}
+.hero-kid .dotbar{display:flex;gap:3px}
+.hero-kid .d{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.2)}
+.hero-kid .d.f{background:var(--c-green)}
+.hero-pending{background:var(--c-orange);border-radius:14px;padding:8px 14px;font-family:'Nunito',sans-serif;font-weight:800;font-size:12px;cursor:pointer}
+.ch-label{font-size:11px;font-weight:800;color:var(--adm-t3);letter-spacing:1px}
+.channels{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.channels::-webkit-scrollbar{display:none}
+.ch{height:126px;border-radius:20px;background:#fff;box-shadow:0 8px 24px rgba(28,30,38,.08);padding:13px;cursor:pointer;transition:all .18s;position:relative;border:2.5px solid transparent}
+.ch:hover{transform:translateY(-5px);border-color:currentColor}
+.ch-ic{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:8px}
+.ch-name{font-family:'Nunito',sans-serif;font-weight:900;font-size:13px;color:var(--adm-t1)}
+.ch-sub{font-size:10px;color:var(--adm-t3);font-weight:600;margin-top:2px}
+.ch .ah-badge{top:10px;right:10px}
+.acts{background:#fff;border-radius:18px;padding:14px 18px;box-shadow:0 8px 24px rgba(28,30,38,.06)}
+.act{display:flex;justify-content:space-between;font-size:12px;padding:7px 0;border-bottom:1px solid var(--adm-alt);color:var(--adm-t2);font-weight:600}
+.act:last-child{border:none}
+.act b{color:var(--adm-t1)}
+
+/* ============ CHILD WORLD ============ */
+.cw{height:100%;position:relative;overflow:hidden;background:linear-gradient(180deg,var(--sky1,#87CEEB) 0%,var(--sky2,#B8E2F5) 45%,#F5E6C8 46%,#E8D5B0 100%)}
+.cw.sore{--sky1:#FFB88C;--sky2:#FFD9A5}
+.cw.malam{--sky1:#1A2745;--sky2:#34466E}
+.cw-floor{position:absolute;bottom:0;width:100%;height:54%;background:linear-gradient(180deg,#C8A87C,#B89868);border-top:6px solid #A8885C}
+.cw-rug{position:absolute;bottom:8%;left:50%;transform:translateX(-50%);width:420px;height:120px;background:radial-gradient(ellipse,#E8856B,#D4694F);border-radius:50%;opacity:.7}
+.cw-window{position:absolute;top:9%;left:50%;transform:translateX(-50%);width:150px;height:120px;background:linear-gradient(#9BD4F0,#C8E8F8);border:8px solid #8B6F47;border-radius:14px}
+.cw-window::after{content:'';position:absolute;inset:0;border-left:4px solid #8B6F47;border-top:4px solid #8B6F47;left:50%;top:50%;width:50%;height:50%;transform:translate(-50%,-50%);border:2px solid #8B6F47}
+/* avatar */
+.cw-avatar{position:absolute;bottom:17%;left:50%;transform:translateX(-50%);text-align:center;cursor:pointer;z-index:5;animation:breathe 3.5s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}
+.cw-char{font-size:110px;filter:drop-shadow(0 8px 12px rgba(0,0,0,.2))}
+.cw-shadow{width:90px;height:16px;background:rgba(0,0,0,.18);border-radius:50%;margin:-6px auto 0}
+.cw-pet{position:absolute;bottom:15%;left:60%;font-size:44px;animation:petbounce 2.2s ease-in-out infinite;cursor:pointer;z-index:4}
+@keyframes petbounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+/* world objects */
+.obj{position:absolute;text-align:center;cursor:pointer;transition:transform .15s;z-index:3}
+.obj:hover{transform:scale(1.1)}
+.obj-ic{font-size:52px;filter:drop-shadow(0 5px 8px rgba(0,0,0,.2))}
+.obj-lbl{font-family:'Nunito',sans-serif;font-weight:800;font-size:10px;background:rgba(255,255,255,.92);border-radius:999px;padding:3px 10px;color:#1C1E26;box-shadow:0 2px 6px rgba(0,0,0,.12);margin-top:2px;display:inline-block}
+.obj .ah-badge{top:-2px;right:6px}
+/* HUD */
+.hud{position:absolute;top:14px;left:16px;right:16px;display:flex;justify-content:space-between;z-index:10}
+.hud-g{display:flex;gap:8px}
+.hud-pill{background:rgba(255,255,255,.88);backdrop-filter:blur(8px);border:2.5px solid var(--daffa);border-radius:999px;padding:6px 14px;font-family:'Nunito',sans-serif;font-weight:900;font-size:13px;color:#1C1E26;display:flex;align-items:center;gap:6px;box-shadow:0 3px 10px rgba(0,0,0,.12)}
+.hud-pill.y{border-color:var(--c-yellow)}
+.hud-pill.lv{border-color:var(--c-purple)}
+.hud-xp{width:60px;height:7px;background:rgba(0,0,0,.12);border-radius:999px;overflow:hidden}
+.hud-xp i{display:block;height:100%;width:62%;background:linear-gradient(90deg,#4CAF50,#8BC34A)}
+.hud-bell{background:rgba(255,255,255,.88);border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;position:relative;border:2.5px solid rgba(0,0,0,.08)}
+/* dock */
+.dock{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,.85);backdrop-filter:blur(10px);border-radius:999px;padding:7px 14px;display:flex;gap:14px;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:10}
+.dock-i{font-size:22px;cursor:pointer;transition:transform .15s;position:relative}
+.dock-i:hover{transform:scale(1.25) translateY(-3px)}
+.dock-i .ah-badge{top:-6px;right:-8px}
+.time-note{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.3);color:#fff;font-size:10px;font-weight:700;padding:3px 12px;border-radius:999px;z-index:10}
+
+/* ============ OVERLAY TASK ============ */
+.ov-wrap{height:100%;position:relative;overflow:hidden}
+.ov-bgworld{position:absolute;inset:0;filter:blur(7px) brightness(.75);transform:scale(1.05)}
+.ov-panel{position:absolute;inset:7% 12%;background:rgba(255,255,255,.96);border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.35);padding:24px 28px;z-index:5;display:flex;flex-direction:column}
+.ov-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.ov-title{font-family:'Nunito',sans-serif;font-weight:900;font-size:22px;color:#1C1E26;display:flex;align-items:center;gap:10px}
+.ov-x{width:38px;height:38px;border-radius:50%;background:#F0F1F5;display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:800;color:#5A5F6E}
+.tk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex:1}
+.tk{border:2.5px solid #E5E8F0;border-radius:20px;overflow:hidden;display:flex;flex-direction:column;background:#fff;transition:transform .15s;cursor:pointer}
+.tk:hover{transform:translateY(-4px)}
+.tk-img{height:84px;display:flex;align-items:center;justify-content:center;font-size:42px}
+.tk-bdg{font-size:9px;font-weight:900;padding:2px 9px;border-radius:999px;margin:9px 9px 4px;display:inline-block;width:fit-content}
+.tk-t{font-family:'Nunito',sans-serif;font-weight:800;font-size:13px;padding:0 10px;color:#1C1E26;flex:1}
+.tk-r{display:flex;gap:9px;padding:7px 10px;font-size:11px;font-weight:800;color:#5A5F6E}
+.tk-btn{border:none;padding:9px;font-family:'Nunito',sans-serif;font-weight:800;font-size:12px;color:#fff;cursor:pointer}
+.tk-wait{background:#FFF4E5;color:#B8690A;text-align:center;padding:9px;font-size:11px;font-weight:800}
+
+/* ============ OVERLAY CELENGAN ============ */
+.cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.cl-stat{background:#F7F8FB;border-radius:16px;padding:13px 16px}
+.cl-stat small{font-size:10px;font-weight:700;color:#9AA0AE;display:block}
+.cl-stat .v{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:19px;margin-top:2px}
+.cl-tabs{display:flex;gap:6px;margin-bottom:13px}
+.cl-tab{padding:8px 18px;border-radius:999px;font-family:'Nunito',sans-serif;font-weight:800;font-size:12px;cursor:pointer;color:#9AA0AE;background:#F0F1F5}
+.cl-tab.on{background:var(--c-purple);color:#fff}
+.cl-item{display:flex;align-items:center;gap:12px;background:#fff;border:2px solid #EDEFF4;border-radius:16px;padding:11px 14px;margin-bottom:9px}
+.cl-ico{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;background:#FFF0EA}
+.cl-info{flex:1}
+.cl-t{font-family:'Nunito',sans-serif;font-weight:800;font-size:13px;color:#1C1E26}
+.cl-d{font-size:10px;color:#9AA0AE;font-weight:600}
+.cl-amt{font-family:'Nunito',sans-serif;font-weight:900;color:var(--c-green-d);margin-right:8px;font-size:14px}
+.btn{font-family:'Nunito',sans-serif;font-weight:800;border:none;border-radius:13px;padding:9px 18px;font-size:12px;cursor:pointer;color:#fff;transition:transform .1s}
+.btn:active{transform:translateY(2px)}
+.btn-g{background:var(--c-green);box-shadow:0 3px 0 var(--c-green-d)}
+.btn-o{background:var(--c-orange);box-shadow:0 3px 0 var(--c-orange-d)}
+
+/* ============ POT INVESTASI ============ */
+.iv-cols{display:flex;gap:20px;flex:1}
+.iv-plant{flex:1;background:linear-gradient(180deg,#E8F8FF,#F0FFF0);border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}
+.iv-tree{font-size:90px;animation:sway 4s ease-in-out infinite}
+@keyframes sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+.iv-stage{display:flex;gap:6px;margin-top:14px}
+.iv-st{width:34px;height:34px;border-radius:10px;background:#fff;border:2px solid #DDE3EC;display:flex;align-items:center;justify-content:center;font-size:16px}
+.iv-st.on{border-color:var(--c-green);background:#E8F5E9}
+.iv-pr{width:70%;height:10px;background:#DDE3EC;border-radius:999px;margin-top:14px;overflow:hidden}
+.iv-pr i{display:block;height:100%;width:40%;background:linear-gradient(90deg,#4CAF50,#8BC34A);border-radius:999px}
+.iv-form{width:300px;display:flex;flex-direction:column;gap:10px}
+.iv-in{border:2.5px solid #DDE3EC;border-radius:14px;padding:11px 14px;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:17px;outline:none;color:#1C1E26}
+.iv-chips{display:flex;gap:7px;flex-wrap:wrap}
+.chip{background:#EDE9FE;color:var(--c-purple);border:none;border-radius:9px;padding:6px 12px;font-family:'Nunito',sans-serif;font-weight:800;font-size:11px;cursor:pointer}
+.iv-est{background:#E8F5E9;border-radius:13px;padding:11px 14px}
+.iv-est small{font-size:10px;font-weight:700;color:var(--c-green-d)}
+.iv-est .v{font-family:'Nunito',sans-serif;font-weight:900;font-size:19px;color:var(--c-green-d)}
+
+/* ============ ADMIN APPROVAL ============ */
+.ap{height:100%;background:var(--adm-bg);padding:22px 26px;color:var(--adm-t1)}
+.ap-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.ap-back{width:38px;height:38px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(28,30,38,.07)}
+.ap-title{font-family:'Nunito',sans-serif;font-weight:900;font-size:20px}
+.ap-card{background:#fff;border-radius:20px;padding:16px 20px;box-shadow:0 8px 24px rgba(28,30,38,.07);display:flex;align-items:center;gap:14px;margin-bottom:12px;max-width:760px}
+.ap-av{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px}
+.ap-info{flex:1}
+.ap-t{font-family:'Nunito',sans-serif;font-weight:800;font-size:15px}
+.ap-s{font-size:12px;color:var(--adm-t3);font-weight:600}
+.ap-type{font-size:10px;font-weight:800;border-radius:999px;padding:3px 10px;margin-right:10px}
+.btn-rej{background:#fff;color:#5A5F6E;border:2px solid #DDE3EC;box-shadow:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="intro">
+<h1>🏠 Winur Family Hub V3 — "Satu Rumah, Dua Dunia"</h1>
+<p>Mockup interaktif tablet landscape 16:10 · Klik tab untuk ganti layar · Buka file ini di tablet untuk merasakan proporsi asli</p>
+</div>
+
+<div class="tabs">
+<button class="tab on" data-s="s1">1. Profile Picker</button>
+<button class="tab" data-s="s2">2. Admin Home</button>
+<button class="tab" data-s="s3">3. Dunia Anak</button>
+<button class="tab" data-s="s4">4. Overlay Task</button>
+<button class="tab" data-s="s5">5. Overlay Celengan</button>
+<button class="tab" data-s="s6">6. Pot Investasi</button>
+<button class="tab" data-s="s7">7. Admin Persetujuan</button>
+</div>
+
+<!-- S1 PROFILE PICKER -->
+<div class="screen on" id="s1">
+<div class="frame"><div class="viewport"><div class="pk">
+<div class="pk-cloud" style="top:12%;width:90px;height:30px"></div>
+<div class="pk-cloud" style="top:25%;width:60px;height:22px;animation-delay:-12s"></div>
+<div class="pk-roof"></div><div class="pk-house"></div>
+<div class="pk-logo">⭐ WINUR FAMILY HUB</div>
+<div class="pk-sub">Siapa yang pulang ke rumah hari ini?</div>
+<div class="pk-cards">
+<div class="pk-card adm"><div class="pk-av" style="background:#E3F2FD">👨</div><div class="pk-name">Ayah</div><span class="pk-role" style="background:#1976D2">ADMIN</span></div>
+<div class="pk-card adm"><div class="pk-av" style="background:#FCE4EC">👩</div><div class="pk-name">Mamah</div><span class="pk-role" style="background:#FF6B9D">ADMIN</span></div>
+<div class="pk-card kid daffa"><div class="pk-av" style="background:#E8F5E9">🧒</div><div class="pk-name">Daffa</div><span class="pk-role" style="background:#4CAF50">ANAK</span><div class="pk-lv">⭐ Level 12</div></div>
+<div class="pk-card kid dio"><div class="pk-av" style="background:#EDE9FE">👦</div><div class="pk-name">Dio</div><span class="pk-role" style="background:#7C3AED">ANAK</span><div class="pk-lv">⭐ Level 1</div></div>
+</div>
+</div></div></div>
+<p class="cap">Gerbang rumah: ilustrasi rumah keluarga + awan bergerak. Kartu admin bergaya clean putih, kartu anak punya warna personal & glow. Tap kartu → zoom-in transisi → PIN.</p>
+</div>
+
+<!-- S2 ADMIN HOME -->
+<div class="screen" id="s2">
+<div class="frame"><div class="viewport"><div class="ah">
+<div class="ah-top">
+<div class="ah-hi">Selamat pagi, Ayah 👋<small>Kamis, 11 Juni 2026</small></div>
+<div class="ah-right"><div class="ah-ic">🔔<span class="ah-badge">3</span></div><div class="ah-ic">👨</div></div>
+</div>
+<div class="hero">
+<div class="hero-l"><small>SALDO KELUARGA</small><div class="amt">Rp 3.000.000</div></div>
+<div class="hero-r">
+<div class="hero-kid">🧒 Daffa <span class="dotbar"><span class="d f"></span><span class="d f"></span><span class="d f"></span><span class="d"></span></span></div>
+<div class="hero-kid">👦 Dio <span class="dotbar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
+<div class="hero-pending">✅ 3 Menunggu Persetujuan</div>
+</div>
+</div>
+<div>
+<div class="ch-label">MENU KELUARGA</div>
+<div class="channels" style="margin-top:8px">
+<div class="ch" style="color:#2E7D32"><div class="ch-ic" style="background:#E8F5E9">💰</div><div class="ch-name">Keuangan</div><div class="ch-sub">Saldo, pocket, transfer</div></div>
+<div class="ch" style="color:#F57C00"><div class="ch-ic" style="background:#FFF3E0">🛒</div><div class="ch-name">Belanja</div><div class="ch-sub">Scan struk & rencana</div></div>
+<div class="ch" style="color:#4CAF50"><div class="ch-ic" style="background:#E8F5E9">🧒</div><div class="ch-name">Dunia Daffa</div><div class="ch-sub">Task, saldo, avatar</div><span class="ah-badge">2</span></div>
+<div class="ch" style="color:#7C3AED"><div class="ch-ic" style="background:#EDE9FE">👦</div><div class="ch-name">Dunia Dio</div><div class="ch-sub">Task, saldo, avatar</div></div>
+<div class="ch" style="color:#1976D2"><div class="ch-ic" style="background:#E3F2FD">✅</div><div class="ch-name">Persetujuan</div><div class="ch-sub">3 menunggu</div><span class="ah-badge">3</span></div>
+<div class="ch" style="color:#5A5F6E"><div class="ch-ic" style="background:#ECEEF2">⚙️</div><div class="ch-name">Pengaturan</div><div class="ch-sub">PIN, profil, reward</div></div>
+</div>
+</div>
+<div class="acts">
+<div class="act"><span><b>Daffa</b> menyelesaikan "Rapikan Tempat Tidur"</span><span>5 mnt lalu</span></div>
+<div class="act"><span><b>Dio</b> klaim saldo Rp 2.000</span><span>1 jam lalu</span></div>
+<div class="act"><span>Gaji Mei masuk <b>+Rp 4.000.000</b></span><span>Kemarin</span></div>
+</div>
+</div></div></div>
+<p class="cap">Nintendo OS style: hero strip gelap dengan saldo besar + status anak hari ini, channel cards besar horizontal scroll dengan aksen warna per channel, aktivitas terbaru ringkas. Tidak ada sidebar/bottom nav.</p>
+</div>
+
+<!-- S3 CHILD WORLD -->
+<div class="screen" id="s3">
+<div class="frame"><div class="viewport"><div class="cw" id="world">
+<div class="time-note" id="timenote">🕐 Langit mengikuti jam asli — klik untuk ganti waktu</div>
+<div class="cw-window"></div>
+<div class="cw-floor"></div>
+<div class="cw-rug"></div>
+<div class="hud">
+<div class="hud-g">
+<div class="hud-pill">🪙 Rp 125.000</div>
+<div class="hud-pill y">⭐ 250</div>
+</div>
+<div class="hud-g">
+<div class="hud-pill lv">Lv.12 <span class="hud-xp"><i></i></span></div>
+<div class="hud-bell">🔔<span class="ah-badge">2</span></div>
+</div>
+</div>
+<div class="obj" style="top:22%;left:7%"><div class="obj-ic">📋</div><div class="obj-lbl">Papan Misi</div><span class="ah-badge">3</span></div>
+<div class="obj" style="top:20%;right:7%"><div class="obj-ic">🏪</div><div class="obj-lbl">Etalase</div></div>
+<div class="obj" style="bottom:24%;left:9%"><div class="obj-ic">👕</div><div class="obj-lbl">Lemari</div></div>
+<div class="obj" style="bottom:22%;right:10%"><div class="obj-ic">🐷</div><div class="obj-lbl">Celengan</div><span class="ah-badge">2</span></div>
+<div class="obj" style="top:47%;left:22%"><div class="obj-ic">🌱</div><div class="obj-lbl">Pot Ajaib</div></div>
+<div class="obj" style="top:46%;right:22%"><div class="obj-ic">📖</div><div class="obj-lbl">Buku</div></div>
+<div class="cw-avatar"><div class="cw-char">🧒</div><div class="cw-shadow"></div></div>
+<div class="cw-pet">🐕</div>
+<div class="dock">
+<div class="dock-i">📋<span class="ah-badge">3</span></div>
+<div class="dock-i">🌱</div>
+<div class="dock-i">👕</div>
+<div class="dock-i">🐷<span class="ah-badge">2</span></div>
+<div class="dock-i">🏪</div>
+<div class="dock-i">📖</div>
+</div>
+</div></div></div>
+<p class="cap">Dunia anak: kamar full screen, avatar besar bernapas di tengah, pet bouncing, 6 objek interaktif dengan badge notifikasi + dock mini fallback di bawah. HUD pill semi-transparan dengan warna personal anak. Langit berubah pagi/sore/malam ikut jam nyata (klik label atas untuk demo).</p>
+</div>
+
+<!-- S4 OVERLAY TASK -->
+<div class="screen" id="s4">
+<div class="frame"><div class="viewport"><div class="ov-wrap">
+<div class="ov-bgworld"><div class="cw" style="height:100%"><div class="cw-floor"></div><div class="cw-avatar"><div class="cw-char">🧒</div></div></div></div>
+<div class="ov-panel">
+<div class="ov-head"><div class="ov-title">📋 Papan Misi Hari Ini <span style="font-size:13px;color:#9AA0AE;font-weight:700">3/4 selesai</span></div><div class="ov-x">✕</div></div>
+<div class="tk-grid">
+<div class="tk"><div class="tk-img" style="background:#E8F5E9">🛏️</div><span class="tk-bdg" style="background:#FFF0EA;color:#E8561F">TASK</span><div class="tk-t">Rapikan Tempat Tidur</div><div class="tk-r"><span>🪙 1.000</span><span>⭐1</span></div><div class="tk-wait">⏳ Menunggu Ayah/Ibu</div></div>
+<div class="tk"><div class="tk-img" style="background:#E3F2FD">🍽️</div><span class="tk-bdg" style="background:#FFF0EA;color:#E8561F">TASK</span><div class="tk-t">Bantu Cuci Piring</div><div class="tk-r"><span>🪙 1.000</span><span>⭐1</span></div><button class="tk-btn" style="background:#4CAF50">✓ Disetujui</button></div>
+<div class="tk"><div class="tk-img" style="background:#FFF8E1">📖</div><span class="tk-bdg" style="background:#FFF0EA;color:#E8561F">TASK</span><div class="tk-t">Baca Al-Quran 15 Menit</div><div class="tk-r"><span>🪙 1.000</span><span>⭐1</span></div><button class="tk-btn" style="background:#FF6B35">Mulai →</button></div>
+<div class="tk"><div class="tk-img" style="background:#EDE9FE">📐</div><span class="tk-bdg" style="background:#EDE9FE;color:#7C3AED">TUGAS</span><div class="tk-t">Matematika Pecahan · 5 Soal</div><div class="tk-r"><span>🪙 2.000</span><span>⭐2</span></div><button class="tk-btn" style="background:#7C3AED">Mulai →</button></div>
+</div>
+</div>
+</div></div></div>
+<p class="cap">Fitur terbuka sebagai overlay panel di atas dunia (dunia tetap terlihat blur di belakang) — anak tidak pernah meninggalkan kamarnya. Kartu task besar bergambar dengan status jelas: Menunggu / Disetujui / Mulai.</p>
+</div>
+
+<!-- S5 OVERLAY CELENGAN -->
+<div class="screen" id="s5">
+<div class="frame"><div class="viewport"><div class="ov-wrap">
+<div class="ov-bgworld"><div class="cw" style="height:100%"><div class="cw-floor"></div><div class="cw-avatar"><div class="cw-char">🧒</div></div></div></div>
+<div class="ov-panel">
+<div class="ov-head"><div class="ov-title">🐷 Celengan Daffa</div><div class="ov-x">✕</div></div>
+<div class="cl-stats">
+<div class="cl-stat"><small>SIAP DIKLAIM</small><div class="v" style="color:#388E3C">Rp 2.000</div></div>
+<div class="cl-stat"><small>TABUNGAN</small><div class="v" style="color:#7C3AED">Rp 125.000</div></div>
+<div class="cl-stat"><small>MENUNGGU APPROVAL</small><div class="v" style="color:#E8561F">Rp 15.000</div></div>
+</div>
+<div class="cl-tabs"><div class="cl-tab on">Siap Diklaim 2</div><div class="cl-tab">Tarik Dana 🔒 Minggu</div><div class="cl-tab">Riwayat</div></div>
+<div class="cl-item"><div class="cl-ico">🍽️</div><div class="cl-info"><div class="cl-t">Bantu Cuci Piring</div><div class="cl-d">Disetujui Mamah • 10:30</div></div><span class="cl-amt">Rp 1.000</span><button class="btn btn-g">Klaim</button></div>
+<div class="cl-item"><div class="cl-ico" style="background:#E8F5E9">🛏️</div><div class="cl-info"><div class="cl-t">Rapikan Tempat Tidur</div><div class="cl-d">Disetujui Ayah • 08:15</div></div><span class="cl-amt">Rp 1.000</span><button class="btn btn-g">Klaim</button></div>
+<div style="display:flex;justify-content:flex-end;margin-top:4px"><button class="btn btn-o">🪙 Klaim Semua → Rp 2.000</button></div>
+</div>
+</div></div></div>
+<p class="cap">Celengan = pusat uang anak. Klaim per task otomatis (koin terbang ke HUD). Tab Tarik Dana terkunci dengan countdown sampai hari Minggu. Klaim Semua untuk sekali tap.</p>
+</div>
+
+<!-- S6 POT INVESTASI -->
+<div class="screen" id="s6">
+<div class="frame"><div class="viewport"><div class="ov-wrap">
+<div class="ov-bgworld"><div class="cw" style="height:100%"><div class="cw-floor"></div></div></div>
+<div class="ov-panel">
+<div class="ov-head"><div class="ov-title">🌱 Pot Ajaib — Investasi</div><div class="ov-x">✕</div></div>
+<div class="iv-cols">
+<div class="iv-plant">
+<div style="font-size:11px;font-weight:800;color:#5A5F6E;margin-bottom:4px">INVESTASI MEI · HARI 12/30</div>
+<div class="iv-tree">🌿</div>
+<div class="iv-stage">
+<div class="iv-st on">🌱</div><div class="iv-st on">🌿</div><div class="iv-st">🪴</div><div class="iv-st">🌳</div><div class="iv-st">🍎</div>
+</div>
+<div class="iv-pr"><i></i></div>
+<div style="font-size:11px;font-weight:700;color:#9AA0AE;margin-top:8px">Modal Rp 100.000 → Panen Rp 110.000 · 18 hari lagi</div>
+</div>
+<div class="iv-form">
+<div style="font-family:'Nunito',sans-serif;font-weight:900;font-size:15px;color:#1C1E26">Tanam Investasi Baru</div>
+<div style="font-size:11px;font-weight:700;color:#9AA0AE">Saldo tersedia: <b style="color:#388E3C">Rp 25.000</b></div>
+<input class="iv-in" value="Rp 10.000">
+<div class="iv-chips"><button class="chip">+10rb</button><button class="chip">+25rb</button><button class="chip">+50rb</button><button class="chip">Semua</button></div>
+<div class="iv-est"><small>ESTIMASI PANEN (30 HARI · +10%)</small><div class="v">Rp 11.000</div></div>
+<div style="font-size:10px;color:#9AA0AE;font-weight:700">🔒 Tidak bisa dibatalkan setelah ditanam</div>
+<button class="btn btn-g" style="padding:12px">🌱 Tanam Sekarang</button>
+</div>
+</div>
+</div>
+</div></div></div>
+<p class="cap">Metafora visual: investasi = menanam. Tanaman tumbuh 5 stage mengikuti progress hari (tunas → pohon berbuah koin). Anak melihat uangnya "tumbuh" secara harfiah.</p>
+</div>
+
+<!-- S7 ADMIN APPROVAL -->
+<div class="screen" id="s7">
+<div class="frame"><div class="viewport"><div class="ap">
+<div class="ap-head"><div class="ap-back">←</div><div class="ap-title">✅ Persetujuan <span style="color:#9AA0AE;font-size:14px">3 menunggu</span></div></div>
+<div class="ap-card">
+<div class="ap-av" style="background:#E8F5E9">🧒</div>
+<div class="ap-info"><div class="ap-t">Rapikan Tempat Tidur</div><div class="ap-s">Daffa • Task • 5 menit lalu</div></div>
+<span class="ap-type" style="background:#FFF0EA;color:#E8561F">TASK SELESAI</span>
+<button class="btn btn-rej">Tolak</button>
+<button class="btn btn-g">Setujui · Rp 1.000</button>
+</div>
+<div class="ap-card">
+<div class="ap-av" style="background:#E8F5E9">🧒</div>
+<div class="ap-info"><div class="ap-t">Tarik Dana Rp 15.000</div><div class="ap-s">Daffa • Hari Minggu • saldo Rp 125.000</div></div>
+<span class="ap-type" style="background:#E3F2FD;color:#1976D2">TARIK DANA</span>
+<button class="btn btn-rej">Tolak</button>
+<button class="btn btn-g">Setujui & Kasih Cash</button>
+</div>
+<div class="ap-card">
+<div class="ap-av" style="background:#EDE9FE">👦</div>
+<div class="ap-info"><div class="ap-t">Tukar: Bola Sepak (300 ⭐)</div><div class="ap-s">Dio • Point Shop • point: 350 ⭐</div></div>
+<span class="ap-type" style="background:#EDE9FE;color:#7C3AED">POINT SHOP</span>
+<button class="btn btn-rej">Tolak</button>
+<button class="btn btn-g">Setujui</button>
+</div>
+</div></div></div>
+<p class="cap">Persetujuan gabungan: semua request (task, tarik dana, point shop) dari semua anak dalam satu list. Approve beruntun, kartu terbang keluar setelah disetujui. Use case pagi hari admin selesai &lt;1 menit.</p>
+</div>
+
+</div>
+<script>
+document.querySelectorAll('.tab').forEach(t=>{
+t.onclick=()=>{
+document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));
+t.classList.add('on');
+document.getElementById(t.dataset.s).classList.add('on');
+};
+});
+// day/night demo
+const world=document.getElementById('world');
+const note=document.getElementById('timenote');
+if(world){
+const modes=[['','🌞 Pagi/Siang'],['sore','🌅 Sore'],['malam','🌙 Malam']];
+let i=0;
+// init by real hour
+const h=new Date().getHours();
+if(h>=15&&h<18)i=1;else if(h>=18||h<6)i=2;
+world.className='cw '+modes[i][0];
+note.textContent=modes[i][1]+' — klik untuk ganti waktu (demo day/night cycle)';
+note.onclick=()=>{i=(i+1)%3;world.className='cw '+modes[i][0];note.textContent=modes[i][1]+' — klik untuk ganti waktu (demo day/night cycle)'};
+}
+</script>
+</body>
+</html>
