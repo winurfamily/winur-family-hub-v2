@@ -2,11 +2,17 @@ export function formatRupiah(amount: number): string {
   return `Rp ${Math.round(amount).toLocaleString("id-ID")}`;
 }
 
-/** Tanggal hari ini dalam format "YYYY-MM-DD" (waktu lokal). */
+/**
+ * Tanggal hari ini dalam format "YYYY-MM-DD", selalu memakai waktu Indonesia
+ * (WIB, UTC+7). Dipakai konsisten oleh client (browser) maupun server (Vercel,
+ * UTC) agar "hari ini" untuk admin & anak selalu sama — sebelumnya memakai
+ * getTimezoneOffset() yang berbeda antara browser (WIB) dan server (UTC),
+ * menyebabkan task/tugas yang dipublikasikan "hari ini" tidak muncul di anak
+ * saat dini hari WIB (00:00-06:59) karena tanggal UTC masih hari sebelumnya.
+ */
 export function todayISODate(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10);
+  const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+  return new Date(Date.now() + WIB_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 export function formatNumber(value: number): string {
