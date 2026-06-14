@@ -7,14 +7,12 @@ import { PocketList } from "../_components/pocket-list";
 export default async function PocketsPage() {
   const summary = await getFinanceSummary();
   const pockets = summary?.pockets ?? [];
-  const totalSplit = summary?.totalSplitPercent ?? 0;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-heading font-extrabold text-ink-1">Pocket Manager</h2>
-          <p className="text-xs text-ink-3">Total split: {totalSplit}% / 100% • Sisa {Math.max(0, 100 - totalSplit)}%</p>
         </div>
         <PocketDialog
           trigger={

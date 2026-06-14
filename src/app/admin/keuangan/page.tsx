@@ -3,6 +3,7 @@ import { getFinanceSummary, getIncomeHistory } from "@/app/actions/keuangan";
 import { formatRupiah } from "@/lib/format";
 import { IncomeDialog } from "./_components/income-dialog";
 import { IncomeHistory } from "./_components/income-history";
+import { PocketCard } from "./_components/pocket-card";
 
 export default async function KeuanganDashboardPage() {
   const [summary, incomeHistory] = await Promise.all([getFinanceSummary(), getIncomeHistory(5)]);
@@ -48,7 +49,6 @@ export default async function KeuanganDashboardPage() {
           <h2 className="font-heading font-extrabold text-ink-1 flex items-center gap-2">
             <PiggyBank className="w-5 h-5 text-secondary" /> Pocket
           </h2>
-          <span className="text-xs font-bold text-ink-3">{summary.totalSplitPercent}% / 100%</span>
         </div>
         {summary.pockets.length === 0 ? (
           <div className="rounded-2xl border-2 border-border bg-card shadow-card p-6 text-center text-sm text-ink-2">
@@ -57,11 +57,7 @@ export default async function KeuanganDashboardPage() {
         ) : (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
             {summary.pockets.map((pocket) => (
-              <div key={pocket.id} className="rounded-2xl border-2 border-border bg-card shadow-card p-4">
-                <p className="text-xs font-bold text-ink-3 uppercase tracking-wide truncate">{pocket.name}</p>
-                <p className="font-mono font-extrabold text-lg text-ink-1 mt-1">{formatRupiah(pocket.balance)}</p>
-                <p className="text-xs text-ink-2 mt-1">Split {pocket.splitPercent}%</p>
-              </div>
+              <PocketCard key={pocket.id} pocket={pocket} />
             ))}
           </div>
         )}

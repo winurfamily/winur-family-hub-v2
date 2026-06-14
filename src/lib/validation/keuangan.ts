@@ -10,7 +10,6 @@ export type IncomeInput = z.infer<typeof incomeSchema>;
 
 export const pocketSchema = z.object({
   name: z.string().min(2, "Nama minimal 2 karakter").max(40),
-  splitPercent: z.coerce.number().min(0, "Minimal 0%").max(100, "Maksimal 100%"),
 });
 export type PocketInput = z.infer<typeof pocketSchema>;
 

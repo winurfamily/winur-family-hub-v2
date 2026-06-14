@@ -21,6 +21,7 @@ export type TaskStatus =
   | "expired";
 export type PocketType = "default" | "custom";
 export type PocketTransferFromType = "main" | "pocket";
+export type PocketTransferToType = "main" | "pocket";
 export type InvestmentStatus = "active" | "completed" | "confirmed";
 export type WithdrawalStatus = "pending" | "approved" | "rejected";
 export type PointRequestStatus = "pending" | "approved" | "rejected";
@@ -270,8 +271,6 @@ export type PocketRow = {
   name: string;
   type: PocketType;
   balance: number;
-  split_percent: number;
-  is_deletable: boolean;
   created_at: string;
 };
 
@@ -291,7 +290,8 @@ export type PocketTransferRow = {
   family_id: string;
   from_type: PocketTransferFromType;
   from_pocket_id: string | null;
-  to_pocket_id: string;
+  to_type: PocketTransferToType;
+  to_pocket_id: string | null;
   amount: number;
   note: string | null;
   income_id: string | null;
@@ -473,11 +473,11 @@ export interface Database {
         AuditLogRow,
         "id" | "actor_id" | "entity_id" | "before_value" | "after_value" | "created_at"
       >;
-      pockets: Helper<PocketRow, "id" | "type" | "balance" | "split_percent" | "is_deletable" | "created_at">;
+      pockets: Helper<PocketRow, "id" | "type" | "balance" | "created_at">;
       income: Helper<IncomeRow, "id" | "note" | "created_by" | "created_at">;
       pocket_transfers: Helper<
         PocketTransferRow,
-        "id" | "from_pocket_id" | "note" | "income_id" | "created_by" | "created_at"
+        "id" | "from_pocket_id" | "to_type" | "to_pocket_id" | "note" | "income_id" | "created_by" | "created_at"
       >;
       products: Helper<
         ProductRow,

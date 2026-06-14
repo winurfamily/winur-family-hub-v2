@@ -1,21 +1,12 @@
 import Link from "next/link";
 import { getFinanceSummary, getIncomeHistory } from "@/app/actions/keuangan";
-import { getChildren } from "@/app/actions/anak-overview";
 import { formatRupiah, formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const CHILD_ACCENTS = [
-  { color: "#4CAF50", bg: "#E8F5E9", emoji: "🧒" },
-  { color: "#7C3AED", bg: "#EDE9FE", emoji: "👦" },
-  { color: "#1976D2", bg: "#E3F2FD", emoji: "🧑" },
-  { color: "#FF6B9D", bg: "#FCE4EC", emoji: "🧒" },
-];
-
 export default async function AdminHomePage() {
-  const [summary, children, incomes] = await Promise.all([
+  const [summary, incomes] = await Promise.all([
     getFinanceSummary(),
-    getChildren(),
     getIncomeHistory(3),
   ]);
 
@@ -81,34 +72,11 @@ export default async function AdminHomePage() {
       </div>
 
       {/* Hero strip */}
-      <div className="flex flex-col gap-4 rounded-[22px] bg-[linear-gradient(120deg,#1C1E26,#343948)] p-5 text-white sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <div>
-          <p className="text-[11px] font-semibold tracking-wide text-white/55">SALDO KELUARGA</p>
-          <p className="mt-1 font-mono text-3xl font-bold">
-            {formatRupiah(summary?.saldoUtama ?? 0)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {children.map((c, i) => {
-            const a = CHILD_ACCENTS[i % CHILD_ACCENTS.length];
-            return (
-              <div key={c.id} className="flex items-center gap-2 text-xs font-bold">
-                <span>{a.emoji} {c.name}</span>
-                <span className="flex gap-[3px]">
-                  {Array.from({ length: 7 }).map((_, d) => (
-                    <span
-                      key={d}
-                      className="h-2 w-2 rounded-full"
-                      style={{
-                        background: d < c.streakDays ? a.color : "rgba(255,255,255,.2)",
-                      }}
-                    />
-                  ))}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+      <div className="rounded-[22px] bg-[linear-gradient(120deg,#1C1E26,#343948)] p-5 text-white sm:px-6">
+        <p className="text-[11px] font-semibold tracking-wide text-white/55">SALDO KELUARGA</p>
+        <p className="mt-1 font-mono text-3xl font-bold">
+          {formatRupiah(summary?.saldoUtama ?? 0)}
+        </p>
       </div>
 
       {/* Channels */}

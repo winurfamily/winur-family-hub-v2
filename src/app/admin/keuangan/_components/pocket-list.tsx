@@ -38,9 +38,7 @@ function PocketRow({ pocket }: { pocket: PocketSummary }) {
     <div className="rounded-2xl border-2 border-border bg-card shadow-card p-4 flex items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="font-heading font-extrabold text-ink-1 truncate">{pocket.name}</p>
-        <p className="text-sm text-ink-2">
-          {formatRupiah(pocket.balance)} • Split {pocket.splitPercent}%
-        </p>
+        <p className="text-sm text-ink-2">{formatRupiah(pocket.balance)}</p>
         {pocket.type === "default" && <p className="text-xs text-ink-3 mt-0.5">Pocket default</p>}
       </div>
       {confirmDelete ? (
@@ -56,18 +54,16 @@ function PocketRow({ pocket }: { pocket: PocketSummary }) {
       ) : (
         <div className="flex items-center gap-1 shrink-0">
           <PocketDialog
-            pocket={{ id: pocket.id, name: pocket.name, splitPercent: pocket.splitPercent }}
+            pocket={{ id: pocket.id, name: pocket.name }}
             trigger={
               <GameButton variant="outline" size="icon">
                 <Pencil className="w-4 h-4" />
               </GameButton>
             }
           />
-          {pocket.isDeletable && pocket.type !== "default" && (
-            <GameButton variant="outline" size="icon" onClick={() => setConfirmDelete(true)}>
-              <Trash2 className="w-4 h-4 text-destructive" />
-            </GameButton>
-          )}
+          <GameButton variant="outline" size="icon" onClick={() => setConfirmDelete(true)}>
+            <Trash2 className="w-4 h-4 text-destructive" />
+          </GameButton>
         </div>
       )}
     </div>

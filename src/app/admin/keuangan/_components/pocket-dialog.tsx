@@ -21,7 +21,7 @@ import { pocketSchema, type PocketInput } from "@/lib/validation/keuangan";
 import { createPocket, updatePocket } from "@/app/actions/keuangan";
 
 interface PocketDialogProps {
-  pocket?: { id: string; name: string; splitPercent: number };
+  pocket?: { id: string; name: string };
   trigger: React.ReactNode;
 }
 
@@ -32,7 +32,7 @@ export function PocketDialog({ pocket, trigger }: PocketDialogProps) {
 
   const form = useForm<z.input<typeof pocketSchema>, unknown, PocketInput>({
     resolver: zodResolver(pocketSchema),
-    defaultValues: { name: pocket?.name ?? "", splitPercent: pocket?.splitPercent ?? 0 },
+    defaultValues: { name: pocket?.name ?? "" },
   });
 
   const onSubmit = (values: PocketInput) => {
@@ -45,7 +45,7 @@ export function PocketDialog({ pocket, trigger }: PocketDialogProps) {
       }
 
       toast.success(isEdit ? "Pocket diperbarui." : "Pocket ditambahkan.");
-      if (!isEdit) form.reset({ name: "", splitPercent: 0 });
+      if (!isEdit) form.reset({ name: "" });
       setOpen(false);
     });
   };
@@ -55,14 +55,14 @@ export function PocketDialog({ pocket, trigger }: PocketDialogProps) {
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) form.reset({ name: pocket?.name ?? "", splitPercent: pocket?.splitPercent ?? 0 });
+        if (next) form.reset({ name: pocket?.name ?? "" });
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="rounded-2xl border-2 border-border max-w-sm">
         <DialogHeader>
           <DialogTitle className="font-heading text-ink-1">{isEdit ? "✏️ Edit Pocket" : "➕ Tambah Pocket"}</DialogTitle>
-          <DialogDescription>Atur nama & persentase split dari pendapatan (total semua pocket maks 100%).</DialogDescription>
+          <DialogDescription>Atur nama pocket untuk menyimpan dan memantau dana keluarga.</DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
@@ -74,19 +74,6 @@ export function PocketDialog({ pocket, trigger }: PocketDialogProps) {
                   <FormLabel>Nama Pocket</FormLabel>
                   <FormControl>
                     <Input placeholder="Mis. Dana Darurat" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="splitPercent"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Split dari Pendapatan (%)</FormLabel>
-                  <FormControl>
-                    <Input type="number" min={0} max={100} step={1} {...field} value={field.value as number} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

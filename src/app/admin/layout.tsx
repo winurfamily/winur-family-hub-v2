@@ -22,7 +22,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="admin-shell min-h-screen bg-background text-ink-1 safe-top">
-      <BgmTrigger track="admin_home" />
+      <BgmTrigger track={null} />
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-3">
           <Link

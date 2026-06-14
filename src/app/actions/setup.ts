@@ -77,8 +77,8 @@ export async function completeSetup(input: CompleteSetupInput): Promise<Complete
   const adminId = admins[0].id as string;
 
   await supabase.from("pockets").insert([
-    { family_id: familyId, name: "Belanja", type: "default", is_deletable: false },
-    { family_id: familyId, name: "Tabungan", type: "default", is_deletable: false },
+    { family_id: familyId, name: "Belanja", type: "default" },
+    { family_id: familyId, name: "Tabungan", type: "default" },
   ]);
 
   const { weekStart, weekEnd } = currentWeekRange();

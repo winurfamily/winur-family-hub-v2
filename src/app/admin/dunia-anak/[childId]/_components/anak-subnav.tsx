@@ -14,7 +14,6 @@ export function AnakSubnav({ childId }: { childId: string }) {
     { href: `${base}/tugas`, label: "Tugas" },
     { href: `${base}/investasi`, label: "Investasi" },
     { href: `${base}/tarik-dana`, label: "Tarik Dana" },
-    { href: `${base}/profil`, label: "Profil" },
   ];
 
   return (

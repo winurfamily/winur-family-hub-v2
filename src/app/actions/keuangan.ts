@@ -73,15 +73,13 @@ export interface PocketSummary {
   name: string;
   type: PocketType;
   balance: number;
-  splitPercent: number;
-  isDeletable: boolean;
+  totalSpent: number;
 }
 
 export interface FinanceSummary {
   saldoUtama: number;
   totalIncome: number;
   totalExpenseThisMonth: number;
-  totalSplitPercent: number;
   pockets: PocketSummary[];
 }
 
@@ -92,14 +90,15 @@ export async function getFinanceSummary(): Promise<FinanceSummary | null> {
   const supabase = createAdminClient();
   const { start, end } = monthRange(currentMonth());
 
-  const [pocketsRes, incomeRes, mainTransfersRes, directExpenseRes, monthExpenseRes] = await Promise.all([
+  const [pocketsRes, incomeRes, mainTransfersOutRes, mainTransfersInRes, directExpenseRes, monthExpenseRes, pocketExpenseRes] = await Promise.all([
     supabase
       .from("pockets")
-      .select("id, name, type, balance, split_percent, is_deletable")
+      .select("id, name, type, balance")
       .eq("family_id", session.familyId)
       .order("created_at", { ascending: true }),
     supabase.from("income").select("amount").eq("family_id", session.familyId),
     supabase.from("pocket_transfers").select("amount").eq("family_id", session.familyId).eq("from_type", "main"),
+    supabase.from("pocket_transfers").select("amount").eq("family_id", session.familyId).eq("to_type", "main"),
     supabase.from("shopping_transactions").select("total").eq("family_id", session.familyId).is("pocket_id", null),
     supabase
       .from("shopping_transactions")
@@ -107,26 +106,32 @@ export async function getFinanceSummary(): Promise<FinanceSummary | null> {
       .eq("family_id", session.familyId)
       .gte("date", start)
       .lte("date", end),
+    supabase.from("shopping_transactions").select("pocket_id, total").eq("family_id", session.familyId).not("pocket_id", "is", null),
   ]);
+
+  const spentByPocket = new Map<string, number>();
+  for (const row of pocketExpenseRes.data ?? []) {
+    const pocketId = row.pocket_id as string;
+    spentByPocket.set(pocketId, (spentByPocket.get(pocketId) ?? 0) + Number(row.total));
+  }
 
   const pockets: PocketSummary[] = (pocketsRes.data ?? []).map((p) => ({
     id: p.id,
     name: p.name,
     type: p.type,
     balance: Number(p.balance),
-    splitPercent: Number(p.split_percent),
-    isDeletable: p.is_deletable,
+    totalSpent: spentByPocket.get(p.id) ?? 0,
   }));
 
   const totalIncome = sumBy(incomeRes.data, "amount");
-  const totalDistributed = sumBy(mainTransfersRes.data, "amount");
+  const totalDistributed = sumBy(mainTransfersOutRes.data, "amount");
+  const totalReturnedToMain = sumBy(mainTransfersInRes.data, "amount");
   const totalDirectExpense = sumBy(directExpenseRes.data, "total");
 
   return {
-    saldoUtama: totalIncome - totalDistributed - totalDirectExpense,
+    saldoUtama: totalIncome - totalDistributed + totalReturnedToMain - totalDirectExpense,
     totalIncome,
     totalExpenseThisMonth: sumBy(monthExpenseRes.data, "total"),
-    totalSplitPercent: pockets.reduce((acc, p) => acc + p.splitPercent, 0),
     pockets,
   };
 }
@@ -207,36 +212,6 @@ export async function addIncome(input: AddIncomeInput): Promise<ActionResult> {
     date: input.date,
   });
 
-  // Auto-split ke pocket sesuai split_percent masing-masing
-  const { data: pockets } = await supabase
-    .from("pockets")
-    .select("id, balance, split_percent")
-    .eq("family_id", session.familyId)
-    .gt("split_percent", 0);
-
-  for (const pocket of pockets ?? []) {
-    const splitAmount = Math.round((input.amount * Number(pocket.split_percent)) / 100);
-    if (splitAmount <= 0) continue;
-
-    await supabase.from("pocket_transfers").insert({
-      family_id: session.familyId,
-      from_type: "main",
-      to_pocket_id: pocket.id,
-      amount: splitAmount,
-      note: `Auto-split dari pendapatan: ${source}`,
-      income_id: income.id,
-      created_by: session.profileId,
-    });
-
-    const balanceBefore = Number(pocket.balance);
-    const balanceAfter = balanceBefore + splitAmount;
-    await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
-
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "auto_split", {
-      balance: balanceBefore,
-    }, { balance: balanceAfter });
-  }
-
   revalidateKeuangan();
   return { success: true };
 }
@@ -263,6 +238,8 @@ export async function deleteIncome(id: string): Promise<ActionResult> {
     .eq("income_id", id);
 
   for (const split of splits ?? []) {
+    if (!split.to_pocket_id) continue;
+
     const { data: pocket } = await supabase
       .from("pockets")
       .select("id, name, balance")
@@ -305,7 +282,6 @@ export async function deleteIncome(id: string): Promise<ActionResult> {
 
 export interface CreatePocketInput {
   name: string;
-  splitPercent: number;
 }
 
 export async function createPocket(input: CreatePocketInput): Promise<ActionResult> {
@@ -314,23 +290,8 @@ export async function createPocket(input: CreatePocketInput): Promise<ActionResu
 
   const name = input.name.trim();
   if (!name) return { success: false, error: "Nama pocket wajib diisi." };
-  if (!Number.isFinite(input.splitPercent) || input.splitPercent < 0 || input.splitPercent > 100) {
-    return { success: false, error: "Split harus antara 0-100%." };
-  }
 
   const supabase = createAdminClient();
-  const { data: existing } = await supabase
-    .from("pockets")
-    .select("split_percent")
-    .eq("family_id", session.familyId);
-
-  const otherTotal = sumBy(existing, "split_percent");
-  if (otherTotal + input.splitPercent > 100) {
-    return {
-      success: false,
-      error: `Total split melebihi 100% (pocket lain sudah ${otherTotal}%, sisa ${100 - otherTotal}%).`,
-    };
-  }
 
   const { data: pocket, error } = await supabase
     .from("pockets")
@@ -338,17 +299,13 @@ export async function createPocket(input: CreatePocketInput): Promise<ActionResu
       family_id: session.familyId,
       name,
       type: "custom",
-      split_percent: input.splitPercent,
     })
     .select("id")
     .single();
 
   if (error || !pocket) return { success: false, error: "Gagal membuat pocket." };
 
-  await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "create", null, {
-    name,
-    splitPercent: input.splitPercent,
-  });
+  await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "create", null, { name });
 
   revalidateKeuangan();
   return { success: true };
@@ -357,7 +314,6 @@ export async function createPocket(input: CreatePocketInput): Promise<ActionResu
 export interface UpdatePocketInput {
   id: string;
   name: string;
-  splitPercent: number;
 }
 
 export async function updatePocket(input: UpdatePocketInput): Promise<ActionResult> {
@@ -366,28 +322,11 @@ export async function updatePocket(input: UpdatePocketInput): Promise<ActionResu
 
   const name = input.name.trim();
   if (!name) return { success: false, error: "Nama pocket wajib diisi." };
-  if (!Number.isFinite(input.splitPercent) || input.splitPercent < 0 || input.splitPercent > 100) {
-    return { success: false, error: "Split harus antara 0-100%." };
-  }
 
   const supabase = createAdminClient();
-  const { data: existing } = await supabase
-    .from("pockets")
-    .select("id, name, split_percent")
-    .eq("family_id", session.familyId)
-    .neq("id", input.id);
-
-  const otherTotal = sumBy(existing, "split_percent");
-  if (otherTotal + input.splitPercent > 100) {
-    return {
-      success: false,
-      error: `Total split melebihi 100% (pocket lain sudah ${otherTotal}%, sisa ${100 - otherTotal}%).`,
-    };
-  }
-
   const { data: before } = await supabase
     .from("pockets")
-    .select("name, split_percent")
+    .select("name")
     .eq("id", input.id)
     .eq("family_id", session.familyId)
     .maybeSingle();
@@ -396,22 +335,13 @@ export async function updatePocket(input: UpdatePocketInput): Promise<ActionResu
 
   const { error } = await supabase
     .from("pockets")
-    .update({ name, split_percent: input.splitPercent })
+    .update({ name })
     .eq("id", input.id)
     .eq("family_id", session.familyId);
 
   if (error) return { success: false, error: "Gagal memperbarui pocket." };
 
-  await logAudit(
-    supabase,
-    session.familyId,
-    session.profileId,
-    "pocket",
-    input.id,
-    "update",
-    { name: before.name, splitPercent: Number(before.split_percent) },
-    { name, splitPercent: input.splitPercent }
-  );
+  await logAudit(supabase, session.familyId, session.profileId, "pocket", input.id, "update", { name: before.name }, { name });
 
   revalidateKeuangan();
   return { success: true };
@@ -424,15 +354,12 @@ export async function deletePocket(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { data: pocket } = await supabase
     .from("pockets")
-    .select("id, name, balance, is_deletable, type")
+    .select("id, name, balance")
     .eq("id", id)
     .eq("family_id", session.familyId)
     .maybeSingle();
 
   if (!pocket) return { success: false, error: "Pocket tidak ditemukan." };
-  if (!pocket.is_deletable || pocket.type === "default") {
-    return { success: false, error: "Pocket default tidak bisa dihapus." };
-  }
   if (Number(pocket.balance) > 0) {
     return { success: false, error: "Pindahkan saldo pocket ini ke pocket lain sebelum menghapus." };
   }
@@ -443,6 +370,47 @@ export async function deletePocket(id: string): Promise<ActionResult> {
   await logAudit(supabase, session.familyId, session.profileId, "pocket", id, "delete", { name: pocket.name }, null);
 
   revalidateKeuangan();
+  return { success: true };
+}
+
+/** Tarik seluruh saldo pocket dan kembalikan ke Saldo Utama. */
+export async function withdrawPocketBalance(id: string): Promise<ActionResult> {
+  const session = await requireAdmin();
+  if (!session) return { success: false, error: "Tidak diizinkan." };
+
+  const supabase = createAdminClient();
+  const { data: pocket } = await supabase
+    .from("pockets")
+    .select("id, name, balance")
+    .eq("id", id)
+    .eq("family_id", session.familyId)
+    .maybeSingle();
+
+  if (!pocket) return { success: false, error: "Pocket tidak ditemukan." };
+
+  const amount = Number(pocket.balance);
+  if (amount <= 0) return { success: false, error: "Saldo pocket sudah kosong." };
+
+  const { error } = await supabase.from("pocket_transfers").insert({
+    family_id: session.familyId,
+    from_type: "pocket",
+    from_pocket_id: pocket.id,
+    to_type: "main",
+    amount,
+    note: `Tarik saldo pocket "${pocket.name}" ke Saldo Utama`,
+    created_by: session.profileId,
+  });
+
+  if (error) return { success: false, error: "Gagal menarik saldo pocket." };
+
+  await supabase.from("pockets").update({ balance: 0 }).eq("id", pocket.id);
+
+  await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "withdraw_to_main", {
+    balance: amount,
+  }, { balance: 0 });
+
+  revalidateKeuangan();
+  await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
   return { success: true };
 }
 
@@ -547,37 +515,111 @@ export interface TransferHistoryItem {
   createdAt: string;
 }
 
-export async function getTransferHistory(limit = 30): Promise<TransferHistoryItem[]> {
+export interface TransferHistoryResult {
+  items: TransferHistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getTransferHistory(page = 1, pageSize = 20): Promise<TransferHistoryResult> {
   const session = await getCurrentSession();
-  if (!session) return [];
+  if (!session) return { items: [], total: 0, page, pageSize };
 
   const supabase = createAdminClient();
-  const { data } = await supabase
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const { data, count } = await supabase
     .from("pocket_transfers")
-    .select("id, from_type, from_pocket_id, to_pocket_id, amount, note, created_at")
+    .select("id, from_type, from_pocket_id, to_type, to_pocket_id, amount, note, created_at", { count: "exact" })
     .eq("family_id", session.familyId)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(from, to);
 
-  if (!data || data.length === 0) return [];
+  if (!data || data.length === 0) return { items: [], total: count ?? 0, page, pageSize };
 
   const pocketIds = new Set<string>();
   for (const row of data) {
     if (row.from_pocket_id) pocketIds.add(row.from_pocket_id);
-    pocketIds.add(row.to_pocket_id);
+    if (row.to_pocket_id) pocketIds.add(row.to_pocket_id);
   }
 
   const { data: pockets } = await supabase.from("pockets").select("id, name").in("id", Array.from(pocketIds));
   const nameMap = new Map((pockets ?? []).map((p) => [p.id, p.name]));
 
-  return data.map((row) => ({
+  const items: TransferHistoryItem[] = data.map((row) => ({
     id: row.id,
     fromLabel: row.from_type === "main" ? "Saldo Utama" : nameMap.get(row.from_pocket_id ?? "") ?? "Pocket",
-    toLabel: nameMap.get(row.to_pocket_id) ?? "Pocket",
+    toLabel: row.to_type === "main" ? "Saldo Utama" : nameMap.get(row.to_pocket_id ?? "") ?? "Pocket",
     amount: Number(row.amount),
     note: row.note,
     createdAt: row.created_at,
   }));
+
+  return { items, total: count ?? 0, page, pageSize };
+}
+
+/** Hapus riwayat transfer & kembalikan saldo pocket terkait seperti sebelum transfer terjadi. */
+export async function deletePocketTransfer(id: string): Promise<ActionResult> {
+  const session = await requireAdmin();
+  if (!session) return { success: false, error: "Tidak diizinkan." };
+
+  const supabase = createAdminClient();
+  const { data: transfer } = await supabase
+    .from("pocket_transfers")
+    .select("id, from_type, from_pocket_id, to_type, to_pocket_id, amount")
+    .eq("id", id)
+    .eq("family_id", session.familyId)
+    .maybeSingle();
+
+  if (!transfer) return { success: false, error: "Riwayat transfer tidak ditemukan." };
+
+  const amount = Number(transfer.amount);
+
+  if (transfer.from_type === "pocket" && transfer.from_pocket_id) {
+    const { data: pocket } = await supabase
+      .from("pockets")
+      .select("id, name, balance")
+      .eq("id", transfer.from_pocket_id)
+      .maybeSingle();
+
+    if (pocket) {
+      const balanceBefore = Number(pocket.balance);
+      const balanceAfter = balanceBefore + amount;
+      await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
+      await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "transfer_delete_revert", {
+        balance: balanceBefore,
+      }, { balance: balanceAfter });
+      await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
+    }
+  }
+
+  if (transfer.to_type === "pocket" && transfer.to_pocket_id) {
+    const { data: pocket } = await supabase
+      .from("pockets")
+      .select("id, name, balance")
+      .eq("id", transfer.to_pocket_id)
+      .maybeSingle();
+
+    if (pocket) {
+      const balanceBefore = Number(pocket.balance);
+      const balanceAfter = Math.max(0, balanceBefore - amount);
+      await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
+      await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "transfer_delete_revert", {
+        balance: balanceBefore,
+      }, { balance: balanceAfter });
+      await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
+    }
+  }
+
+  const { error } = await supabase.from("pocket_transfers").delete().eq("id", id).eq("family_id", session.familyId);
+  if (error) return { success: false, error: "Gagal menghapus riwayat transfer." };
+
+  await logAudit(supabase, session.familyId, session.profileId, "pocket_transfer", id, "delete", { amount }, null);
+
+  revalidateKeuangan();
+  return { success: true };
 }
 
 // ---------------------------------------------------------------------------

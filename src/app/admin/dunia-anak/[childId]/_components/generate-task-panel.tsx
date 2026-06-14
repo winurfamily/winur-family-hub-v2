@@ -11,17 +11,28 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TaskIllustration } from "@/components/shared/task-illustration";
 import { generateTaskDraft, publishTask, type TaskDraft } from "@/app/actions/anak-tasks";
-import type { TugasQuestionInput } from "@/lib/validation/dunia-anak";
+import type { TugasQuestionInput, FamilySettingsInput } from "@/lib/validation/dunia-anak";
 import { REWARD, getTaskCategories } from "@/lib/constants";
+
+function emptyQuestions(): TugasQuestionInput[] {
+  return Array.from({ length: 5 }, () => ({
+    question: "",
+    options: ["", "", "", ""] as [string, string, string, string],
+    correct_answer: 0,
+    explanation: "",
+  }));
+}
 
 export function GenerateTaskPanel({
   childId,
   taskCount,
   tugasCount,
+  rewardDefaults,
 }: {
   childId: string;
   taskCount: number;
   tugasCount: number;
+  rewardDefaults: FamilySettingsInput | null;
 }) {
   const router = useRouter();
   const [type, setType] = useState<"task" | "tugas" | null>(null);
@@ -73,6 +84,33 @@ export function GenerateTaskPanel({
     });
   };
 
+  const handleManual = () => {
+    if (!type || !category) return;
+    const money =
+      type === "task" ? rewardDefaults?.defaultTaskMoney ?? REWARD.TASK_MONEY : rewardDefaults?.defaultTugasMoney ?? REWARD.TUGAS_MONEY;
+    const point =
+      type === "task" ? rewardDefaults?.defaultTaskPoint ?? REWARD.TASK_POINT : rewardDefaults?.defaultTugasPoint ?? REWARD.TUGAS_POINT;
+    const xp = type === "task" ? rewardDefaults?.defaultTaskXp ?? REWARD.TASK_XP : rewardDefaults?.defaultTugasXp ?? REWARD.TUGAS_XP;
+    const initialQuestions = type === "tugas" ? emptyQuestions() : [];
+
+    setDraft({
+      title: "",
+      description: "",
+      imageUrl: null,
+      category,
+      rewardMoney: money,
+      rewardPoint: point,
+      rewardXp: xp,
+      questions: initialQuestions,
+    });
+    setTitle("");
+    setDescription("");
+    setRewardMoney(money);
+    setRewardPoint(point);
+    setRewardXp(xp);
+    setQuestions(initialQuestions);
+  };
+
   const updateQuestion = (index: number, patch: Partial<TugasQuestionInput>) => {
     setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)));
   };
@@ -90,6 +128,20 @@ export function GenerateTaskPanel({
 
   const handlePublish = () => {
     if (!type || !draft) return;
+
+    if (title.trim().length < 2) {
+      toast.error("Judul minimal 2 karakter.");
+      return;
+    }
+
+    if (type === "tugas") {
+      const isIncomplete = questions.some((q) => !q.question.trim() || q.options.some((opt) => !opt.trim()));
+      if (questions.length !== 5 || isIncomplete) {
+        toast.error("Lengkapi 5 soal dan semua pilihan jawaban.");
+        return;
+      }
+    }
+
     startPublish(async () => {
       const res = await publishTask({
         childId,
@@ -120,7 +172,7 @@ export function GenerateTaskPanel({
   return (
     <div className="rounded-2xl border-2 border-border bg-card shadow-card p-4 space-y-3">
       <h2 className="font-heading font-extrabold text-ink-1 flex items-center gap-2">
-        <Sparkles className="w-5 h-5 text-accent" /> Generate dengan AI
+        <Sparkles className="w-5 h-5 text-accent" /> Tambah Task & Tugas
       </h2>
 
       {!type && !draft && (
@@ -181,6 +233,9 @@ export function GenerateTaskPanel({
             <GameButton type="button" variant="outline" onClick={reset} disabled={isGenerating}>
               Batal
             </GameButton>
+            <GameButton type="button" variant="yellow" onClick={handleManual} disabled={isGenerating}>
+              Isi Manual
+            </GameButton>
             <GameButton type="button" variant="secondary" block onClick={handleGenerate} disabled={isGenerating}>
               {isGenerating ? "Membuat..." : "Generate"}
             </GameButton>
@@ -199,7 +254,7 @@ export function GenerateTaskPanel({
 
           <div className="space-y-1">
             <Label>Judul</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={`Judul ${type === "tugas" ? "tugas" : "task"}`} />
           </div>
 
           <div className="space-y-1">
@@ -208,6 +263,7 @@ export function GenerateTaskPanel({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
+              placeholder="Instruksi singkat untuk anak"
               className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
@@ -235,7 +291,11 @@ export function GenerateTaskPanel({
               {questions.map((q, qi) => (
                 <div key={qi} className="rounded-xl border-2 border-border p-3 space-y-2">
                   <p className="text-xs font-bold text-ink-3">Soal {qi + 1}</p>
-                  <Input value={q.question} onChange={(e) => updateQuestion(qi, { question: e.target.value })} />
+                  <Input
+                    value={q.question}
+                    onChange={(e) => updateQuestion(qi, { question: e.target.value })}
+                    placeholder="Tulis pertanyaan"
+                  />
                   {q.options.map((opt, oi) => (
                     <div key={oi} className="flex items-center gap-2">
                       <input
@@ -245,7 +305,11 @@ export function GenerateTaskPanel({
                         onChange={() => updateQuestion(qi, { correct_answer: oi })}
                         className="shrink-0 accent-secondary"
                       />
-                      <Input value={opt} onChange={(e) => updateOption(qi, oi, e.target.value)} />
+                      <Input
+                        value={opt}
+                        onChange={(e) => updateOption(qi, oi, e.target.value)}
+                        placeholder={`Pilihan ${String.fromCharCode(65 + oi)} (pilih radio jika benar)`}
+                      />
                     </div>
                   ))}
                   <Input
