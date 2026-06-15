@@ -276,7 +276,7 @@
 /* ====================================================================== */
 .world-root {
   font-family: var(--font-nunito), sans-serif;
-  touch-action: none;
+  touch-action: manipulation;
 }
 /* STAGE fullscreen cover-scale (Docs/FIX_KAMAR_ANAK.md poin 1) — ukuran & posisi
    dihitung di JS (child-world.tsx) dari imgW/imgH tema yang di-cover ke viewport
@@ -288,7 +288,7 @@
 .world-root .stage {
   position: absolute;
   background: #1a2a40;
-  touch-action: none;
+  touch-action: manipulation;
 }
 /* Background kamar: dua layer untuk crossfade siang/malam */
 .world-root .bg {
@@ -610,6 +610,9 @@
   width: min(680px, 94%);
   max-height: 88%;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   background: #fff;
   border-radius: 24px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
