@@ -58,7 +58,7 @@ export function ProfilePicker({ profiles, familyId }: ProfilePickerProps) {
           ⭐ Winur Family Hub
         </h1>
         <p className="mt-1 font-body text-sm font-semibold text-ink-2">
-          Siapa yang pulang ke rumah hari ini?
+          Siapa yang akan lanjut progres hari ini?
         </p>
       </motion.div>
 
