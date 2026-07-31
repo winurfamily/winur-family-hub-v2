@@ -522,6 +522,101 @@ export interface CheckoutPlanItemInput {
   clientToken?: string;
 }
 
+export interface CompleteShoppingPlanInput {
+  planId: string;
+  source: string;
+  date: string;
+  merchant: string;
+  note?: string;
+  actualPrices?: Record<string, number>;
+  clientToken?: string;
+}
+
+export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Promise<ActionResult<{ id: string }>> {
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date ?? "")) return { success: false, error: "Tanggal tidak valid." };
+  const merchant = input.merchant?.trim();
+  if (!merchant) return { success: false, error: "Nama toko wajib diisi." };
+
+  const supabase = createAdminClient();
+  if (!(await assertPlanOwnership(supabase, session.familyId, input.planId))) {
+    return { success: false, error: "Rencana tidak ditemukan." };
+  }
+
+  const { data: existingTx } = await supabase
+    .from("shopping_transactions")
+    .select("id")
+    .eq("family_id", session.familyId)
+    .eq("plan_id", input.planId)
+    .limit(1);
+
+  if ((existingTx ?? []).length > 0) {
+    return { success: false, error: "Rencana ini sudah memiliki transaksi belanja." };
+  }
+
+  const { data: rows } = await supabase
+    .from("shopping_plan_items")
+    .select("id, name, qty, estimated_price, actual_price, status, transaction_id")
+    .eq("plan_id", input.planId)
+    .order("position");
+
+  const active = (rows ?? []).filter((item) => item.status !== "cancelled");
+  if (active.length === 0) return { success: false, error: "Tidak ada barang aktif untuk diselesaikan." };
+  if (active.some((item) => item.transaction_id)) {
+    return { success: false, error: "Sebagian barang sudah pernah dicatat sebagai transaksi." };
+  }
+
+  const prices = input.actualPrices ?? {};
+  const items = active.map((item) => {
+    const actual = toRupiah(prices[item.id] ?? item.actual_price ?? item.estimated_price);
+    return {
+      name: item.name,
+      qty: Number(item.qty),
+      price: Number.isFinite(actual) && actual >= 0 ? actual : Number(item.estimated_price),
+    };
+  });
+
+  const result = await createShoppingTransaction({
+    merchant,
+    date: input.date,
+    source: input.source,
+    category: "belanja",
+    note: input.note,
+    items,
+    origin: "plan",
+    planId: input.planId,
+    clientToken: input.clientToken,
+  });
+
+  if (!result.success || !result.data) return result;
+
+  for (const item of active) {
+    const actual = toRupiah(prices[item.id] ?? item.actual_price ?? item.estimated_price);
+    await supabase
+      .from("shopping_plan_items")
+      .update({
+        status: "bought",
+        checked: true,
+        actual_price: Number.isFinite(actual) && actual >= 0 ? actual : item.estimated_price,
+        transaction_id: result.data.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", item.id);
+  }
+
+  await recalcPlanTotals(supabase, input.planId);
+  await supabase
+    .from("shopping_plans")
+    .update({ status: "done", updated_at: new Date().toISOString() })
+    .eq("id", input.planId)
+    .eq("family_id", session.familyId);
+
+  revalidateKeuangan();
+  return { success: true, data: { id: result.data.id } };
+}
+
 /**
  * Tandai barang rencana sebagai sudah dibeli dan catat transaksi belanjanya.
  * Pemotongan saldo dilakukan oleh RPC belanja, jadi record + saldo tetap atomik.
@@ -547,7 +642,7 @@ export async function checkoutPlanItem(input: CheckoutPlanItemInput): Promise<Ac
     merchant: input.merchant?.trim() || plan?.name || "Belanja Rencana",
     date: input.date,
     source: input.source,
-    category: input.category ?? "belanja_rumah",
+    category: input.category ?? "belanja",
     items: [{ name: item.name, qty: Number(item.qty), price }],
     origin: "plan",
     planId: item.plan_id,

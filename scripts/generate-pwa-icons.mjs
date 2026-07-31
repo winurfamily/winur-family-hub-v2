@@ -1,13 +1,13 @@
-// Generate PWA / favicon icons from Desain_ref/logo.png (Decision #4: PWA manifest + icons).
+// Generate PWA / favicon icons from the lightweight Winur SVG brand mark.
 // Run with: node scripts/generate-pwa-icons.mjs
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 
 const root = path.resolve(import.meta.dirname, "..");
-const source = path.join(root, "Desain_ref", "logo.png");
+const source = path.join(root, "public", "assets", "branding", "winur-logo-icon.svg");
 const iconsDir = path.join(root, "public", "icons");
-const BG = "#E8F4FD"; // --background (Sky Adventure)
+const BG = "#fff7fa";
 
 async function main() {
   await mkdir(iconsDir, { recursive: true });

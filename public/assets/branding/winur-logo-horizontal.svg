@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" role="img" aria-label="Winur Family Hub">
+  <rect x="4" y="8" width="80" height="80" rx="24" fill="#ef5b93"/>
+  <path d="M22 44c0-14 10-23 22-23s22 9 22 23c0 15-14 25-22 31-8-6-22-16-22-31Z" fill="#fff7fa"/>
+  <path d="M34 44c0-6 4-10 10-10s10 4 10 10c0 6-5 10-10 13-5-3-10-7-10-13Z" fill="#ffd7e6"/>
+  <text x="104" y="43" font-family="Arial, sans-serif" font-size="28" font-weight="800" fill="#3b3036">Winur</text>
+  <text x="104" y="68" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#ef5b93">Family Hub</text>
+</svg>

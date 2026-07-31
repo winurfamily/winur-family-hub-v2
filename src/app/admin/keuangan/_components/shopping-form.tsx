@@ -64,7 +64,7 @@ export function ShoppingForm({
   const [merchant, setMerchant] = useState(defaults?.merchant ?? "");
   const [date, setDate] = useState(defaults?.date ?? todayISODate());
   const [sourceValue, setSourceValue] = useState("main");
-  const [category, setCategory] = useState(defaults?.category ?? "belanja_rumah");
+  const [category, setCategory] = useState(defaults?.category ?? "belanja");
   const [note, setNote] = useState("");
   const [receipt, setReceipt] = useState<AttachedReceipt | null>(initialReceipt);
   const [items, setItems] = useState<DraftItem[]>(

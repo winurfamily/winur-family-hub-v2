@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireFinanceSession, isUuid } from "@/lib/server/finance-helpers";
 import {
+  EXPENSE_CATEGORY_ALIASES,
   EXPENSE_CATEGORY_LABELS,
   INCOME_CATEGORY_LABELS,
   type ExpenseCategory,
@@ -128,7 +129,11 @@ export async function getLedger(filter: LedgerFilter = {}): Promise<LedgerResult
       title: r.merchant ?? r.name,
       account: accountOf(r.pocket_id),
       categoryKey: r.category,
-      categoryLabel: EXPENSE_CATEGORY_LABELS[(r.category ?? "lainnya") as ExpenseCategory] ?? "Lainnya",
+      categoryLabel:
+        EXPENSE_CATEGORY_LABELS[
+          EXPENSE_CATEGORY_ALIASES[(r.category ?? "lainnya") as ExpenseCategory] ??
+            ((r.category ?? "lainnya") as ExpenseCategory)
+        ] ?? "Lainnya",
       amount: Number(r.total),
       date: r.date,
       note: r.note,

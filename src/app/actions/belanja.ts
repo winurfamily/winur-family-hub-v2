@@ -18,6 +18,7 @@ import { attachReceiptToTransaction, removeReceiptFiles } from "@/lib/server/rec
 import { currentMonth, monthRange } from "@/lib/finance";
 import {
   EXPENSE_CATEGORIES,
+  EXPENSE_CATEGORY_ALIASES,
   type ExpenseCategory,
   type ShoppingTransactionSource,
 } from "@/lib/supabase/types";
@@ -65,7 +66,8 @@ export interface ShoppingTransactionView {
 }
 
 function normalizeCategory(value: unknown): ExpenseCategory {
-  return EXPENSE_CATEGORIES.includes(value as ExpenseCategory) ? (value as ExpenseCategory) : "lainnya";
+  const category = EXPENSE_CATEGORIES.includes(value as ExpenseCategory) ? (value as ExpenseCategory) : "lainnya";
+  return EXPENSE_CATEGORY_ALIASES[category] ?? category;
 }
 
 /** Bersihkan & validasi daftar item dari client. Nominal selalu dibulatkan. */

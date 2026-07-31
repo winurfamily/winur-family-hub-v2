@@ -32,27 +32,42 @@ export type ShoppingTransactionSource = "manual" | "scan" | "plan";
 /** Kategori pengeluaran belanja (F2.5). Nilai disimpan sebagai text di DB. */
 export const EXPENSE_CATEGORIES = [
   "makanan",
-  "belanja_rumah",
+  "rumah",
   "transportasi",
+  "anak",
   "pendidikan",
   "kesehatan",
   "tagihan",
-  "anak",
+  "belanja",
   "hiburan",
+  "sosial",
+  "hadiah",
+  "belanja_rumah",
   "lainnya",
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
 export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   makanan: "Makanan",
-  belanja_rumah: "Belanja Rumah",
+  rumah: "Rumah",
   transportasi: "Transportasi",
+  anak: "Anak",
   pendidikan: "Pendidikan",
   kesehatan: "Kesehatan",
   tagihan: "Tagihan",
-  anak: "Anak",
+  belanja: "Belanja",
   hiburan: "Hiburan",
+  sosial: "Sosial",
+  hadiah: "Hadiah",
+  belanja_rumah: "Belanja Rumah",
   lainnya: "Lainnya",
+};
+
+export const SYSTEM_EXPENSE_CATEGORIES = ["belanja"] as const;
+
+/** Legacy aliases kept so old rows still render and filter correctly. */
+export const EXPENSE_CATEGORY_ALIASES: Partial<Record<ExpenseCategory, ExpenseCategory>> = {
+  belanja_rumah: "belanja",
 };
 
 /** Kategori pendapatan. */

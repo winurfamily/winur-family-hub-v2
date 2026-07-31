@@ -108,6 +108,37 @@
     --shadow-card-deep: 0 16px 40px rgba(28, 30, 38, 0.16);
   }
 
+  .parent-finance-app {
+    --background: #fff7fa;
+    --foreground: #3b3036;
+    --card: #ffffff;
+    --card-foreground: #3b3036;
+    --surface: #ffffff;
+    --surface-2: #fff0f6;
+    --popover: #ffffff;
+    --popover-foreground: #3b3036;
+    --border: #f5c9d9;
+    --border-dark: #eaa6bf;
+    --input: #f5c9d9;
+    --muted: #fff0f6;
+    --muted-foreground: #9b7d8a;
+    --text-1: #3b3036;
+    --text-2: #6f5964;
+    --text-3: #9b7d8a;
+    --primary: #ef5b93;
+    --primary-dark: #d6427b;
+    --primary-light: #fff0f6;
+    --secondary: #54bf74;
+    --secondary-dark: #3ca85f;
+    --secondary-light: #effaf2;
+    --accent: #8d78df;
+    --accent-dark: #715ac8;
+    --accent-light: #f1edff;
+    --ring: #ef5b93;
+    --shadow-card: 0 10px 26px rgba(120, 55, 82, 0.1);
+    --shadow-card-deep: 0 22px 58px rgba(120, 55, 82, 0.18);
+  }
+
   /* Dunia Anak — tema dark navy "game world", di-scope lewat class .child-shell */
   .child-shell {
     --background: #0A1628;
