@@ -48,3 +48,6 @@ public/swe-worker-*.js.map
 /ios
 
 .vercel
+.env
+.env.*
+!.env.example
