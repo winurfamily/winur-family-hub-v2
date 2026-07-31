@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, ChevronLeft, Minus, Plus, Trash2, Undo2, X } from "lucide-react";
-import { GameButton } from "@/components/ui/game-button";
 import { Input } from "@/components/ui/input";
 import { Panel, ProgressBar, EmptyState } from "@/components/finance/ui";
 import { PasteListSheet } from "../../_components/paste-list-sheet";
@@ -42,6 +41,11 @@ const FILTERS: { id: Filter; label: string }[] = [
  * Perubahan status ditampilkan optimistik (useOptimistic) sehingga mencentang
  * terasa seketika dan hanya baris itu yang berubah — tidak ada render ulang
  * seluruh halaman menunggu server.
+ *
+ * Tambah-barang dan "Selesaikan Belanja" hidup di satu bilah yang menempel di
+ * bawah layar HP: dua aksi itu dipakai justru ketika daftarnya sudah panjang,
+ * jadi menaruhnya di bawah daftar berarti harus menggulir seluruh troli dulu.
+ * Di layar lebar bilah yang sama menjadi panel samping yang ikut menggantung.
  */
 export function ChecklistView({
   plan,
@@ -62,6 +66,7 @@ export function ChecklistView({
 
   const counted = items.filter((item) => item.status !== "cancelled");
   const bought = counted.filter((item) => item.status === "bought").length;
+  const remaining = counted.length - bought;
   const percent = counted.length > 0 ? Math.round((bought / counted.length) * 100) : 0;
   const locked = plan.status === "done";
 
@@ -113,20 +118,19 @@ export function ChecklistView({
   };
 
   return (
-    <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-5 lg:space-y-0">
-      <div className="min-w-0 space-y-4">
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-5">
+      <div className="min-w-0 space-y-3">
         <Panel className="p-4">
           <Link
             href="/admin/belanja"
-            className="-ml-2 mb-1 inline-flex min-h-11 items-center gap-1 rounded-xl px-2 text-xs font-extrabold text-ink-2"
+            className="-ml-2 mb-1 inline-flex min-h-11 items-center gap-1 rounded-xl px-2 text-xs font-extrabold text-ink-2 transition-transform duration-150 active:scale-95"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden /> Semua Rencana
           </Link>
 
           <h1 className="break-words font-heading text-xl font-black text-ink-1">{plan.name}</h1>
           <p className="mt-0.5 text-xs font-semibold text-ink-3">
-            {plan.plannedDate ? formatDate(plan.plannedDate) : "Tanpa tanggal"} ·{" "}
-            {counted.length} barang
+            {plan.plannedDate ? formatDate(plan.plannedDate) : "Tanpa tanggal"} · {counted.length} barang
           </p>
 
           <div className="mt-3 space-y-1.5">
@@ -139,6 +143,12 @@ export function ChecklistView({
             <ProgressBar percent={percent} tone={locked ? "good" : "primary"} />
           </div>
 
+          {!locked && (
+            <div className="mt-3">
+              <PasteListSheet planId={plan.id} />
+            </div>
+          )}
+
           {locked && (
             <p className="mt-3 rounded-xl bg-secondary-light px-3 py-2 text-xs font-bold text-secondary-dark">
               Rencana ini sudah diselesaikan dan transaksinya tercatat di Keuangan.
@@ -146,15 +156,20 @@ export function ChecklistView({
           )}
         </Panel>
 
-        <Panel className="p-3 sm:p-4">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <Panel className="overflow-hidden">
+          {/* SENGAJA tidak menggantung. Bilah filter yang ikut menggulir akan
+              menutupi kotak centang barang teratas — persis bagian yang paling
+              sering ditekan sambil mendorong troli. Filter dipakai sekali di
+              awal, jadi cukup berada di kepala daftar. */}
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-card px-3 py-2.5 sm:px-4">
             {FILTERS.map((option) => (
               <button
                 key={option.id}
                 type="button"
                 onClick={() => setFilter(option.id)}
+                aria-pressed={filter === option.id}
                 className={cn(
-                  "tap-target rounded-full px-3.5 text-[13px] font-black transition-colors",
+                  "tap-target rounded-full px-3.5 text-[13px] font-black transition-all duration-150 active:scale-95",
                   filter === option.id ? "bg-primary text-white shadow-card" : "bg-surface-2 text-ink-3"
                 )}
               >
@@ -164,7 +179,7 @@ export function ChecklistView({
           </div>
 
           {visible.length === 0 ? (
-            <div className="mt-3">
+            <div className="p-3 sm:p-4">
               <EmptyState
                 title={items.length === 0 ? "Daftar masih kosong" : "Tidak ada barang di filter ini"}
                 text={
@@ -175,7 +190,7 @@ export function ChecklistView({
               />
             </div>
           ) : (
-            <ul className="mt-3 divide-y divide-border">
+            <ul className="divide-y divide-border px-3 sm:px-4">
               {visible.map((item) => (
                 <ChecklistRow
                   key={item.id}
@@ -196,20 +211,6 @@ export function ChecklistView({
             </ul>
           )}
         </Panel>
-      </div>
-
-      <div className="space-y-3 lg:sticky lg:top-20">
-        {!locked && (
-          <>
-            <Panel className="space-y-2.5 p-4">
-              <h2 className="font-heading text-[15px] font-black text-ink-1">Tambah barang</h2>
-              <QuickAddForm planId={plan.id} />
-              <PasteListSheet planId={plan.id} />
-            </Panel>
-
-            <CompleteSheet plan={plan} items={items} summary={summary} />
-          </>
-        )}
 
         {locked && (
           <Panel className="p-4">
@@ -231,7 +232,30 @@ export function ChecklistView({
             </p>
           </Panel>
         )}
+
+        {/* Ruang bagi bilah aksi mengambang di HP. */}
+        {!locked && <div aria-hidden className="h-[76px] lg:hidden" />}
       </div>
+
+      {/* -------- Bilah aksi: melayang di HP, panel menggantung di desktop -------- */}
+      {!locked && (
+        <div
+          className={cn(
+            "pointer-events-none fixed inset-x-0 bottom-[68px] z-40 px-3 pb-[env(safe-area-inset-bottom)]",
+            "lg:sticky lg:top-20 lg:z-auto lg:mt-0 lg:px-0 lg:pb-0"
+          )}
+        >
+          <div
+            className={cn(
+              "pointer-events-auto mx-auto flex max-w-md items-center gap-2 rounded-[26px] border border-border/70 bg-card/95 p-2 shadow-card-deep backdrop-blur",
+              "lg:max-w-none lg:flex-col lg:items-stretch lg:gap-3 lg:rounded-[22px] lg:border-0 lg:bg-card lg:p-4 lg:shadow-card lg:backdrop-blur-none"
+            )}
+          >
+            <QuickAddForm planId={plan.id} />
+            <CompleteSheet plan={plan} items={items} summary={summary} remaining={remaining} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -257,7 +281,9 @@ function ChecklistRow({
   const cancelled = item.status === "cancelled";
 
   return (
-    <li>
+    // scroll-mt menjaga baris tidak berhenti tepat di bawah header yang
+    // menempel ketika digulir ke posisinya.
+    <li className="scroll-mt-[76px]">
       <div className="flex items-center gap-2 py-1">
         <button
           type="button"
@@ -266,23 +292,27 @@ function ChecklistRow({
           aria-pressed={done}
           aria-label={`${done ? "Batal tandai" : "Tandai sudah dibeli"}: ${item.name}`}
           className={cn(
-            "grid h-12 w-12 shrink-0 place-items-center rounded-2xl border-2 transition-colors disabled:opacity-40",
+            "grid h-12 w-12 shrink-0 place-items-center rounded-2xl border-2",
+            "transition-[transform,background-color,border-color] duration-150 ease-out",
+            "active:scale-90 disabled:opacity-40",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
             done
               ? "border-secondary-dark bg-secondary text-white"
               : "border-border bg-card text-transparent active:bg-primary-light"
           )}
         >
-          <Check className="h-6 w-6" aria-hidden />
+          <Check className="h-6 w-6" strokeWidth={3} aria-hidden />
         </button>
 
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="min-w-0 flex-1 py-2 text-left"
+          aria-expanded={expanded}
+          className="min-w-0 flex-1 rounded-xl py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <p
             className={cn(
-              "truncate text-[15px] font-bold",
+              "truncate text-[15px] font-bold transition-colors duration-200",
               done && "text-ink-3 line-through",
               cancelled && "text-ink-3 line-through opacity-60"
             )}
@@ -302,7 +332,7 @@ function ChecklistRow({
           disabled={locked}
           onClick={onCancel}
           aria-label={cancelled ? `Kembalikan ${item.name}` : `Tandai ${item.name} tidak jadi dibeli`}
-          className="tap-target grid shrink-0 place-items-center rounded-xl text-ink-3 transition-colors active:bg-surface-2 disabled:opacity-40"
+          className="tap-target grid shrink-0 place-items-center rounded-xl text-ink-3 transition-all duration-150 active:scale-90 active:bg-surface-2 disabled:opacity-40"
         >
           {cancelled ? <Undo2 className="h-5 w-5" aria-hidden /> : <X className="h-5 w-5" aria-hidden />}
         </button>
@@ -316,7 +346,7 @@ function ChecklistRow({
               type="button"
               onClick={() => onQty(-1)}
               aria-label={`Kurangi jumlah ${item.name}`}
-              className="tap-target grid place-items-center rounded-xl border-2 border-border bg-card text-ink-2 active:bg-surface-2"
+              className="tap-target grid place-items-center rounded-xl border-2 border-border bg-card text-ink-2 transition-transform duration-150 active:scale-90 active:bg-surface-2"
             >
               <Minus className="h-4 w-4" aria-hidden />
             </button>
@@ -327,7 +357,7 @@ function ChecklistRow({
               type="button"
               onClick={() => onQty(1)}
               aria-label={`Tambah jumlah ${item.name}`}
-              className="tap-target grid place-items-center rounded-xl border-2 border-border bg-card text-ink-2 active:bg-surface-2"
+              className="tap-target grid place-items-center rounded-xl border-2 border-border bg-card text-ink-2 transition-transform duration-150 active:scale-90 active:bg-surface-2"
             >
               <Plus className="h-4 w-4" aria-hidden />
             </button>
@@ -336,7 +366,7 @@ function ChecklistRow({
             type="button"
             onClick={onDelete}
             aria-label={`Hapus ${item.name} dari daftar`}
-            className="tap-target ml-auto grid place-items-center rounded-xl text-destructive active:bg-destructive/10"
+            className="tap-target ml-auto grid place-items-center rounded-xl text-destructive transition-transform duration-150 active:scale-90 active:bg-destructive/10"
           >
             <Trash2 className="h-4 w-4" aria-hidden />
           </button>
@@ -369,7 +399,7 @@ function QuickAddForm({ planId }: { planId: string }) {
   };
 
   return (
-    <form onSubmit={submit} className="flex gap-2">
+    <form onSubmit={submit} className="flex min-w-0 flex-1 gap-1.5">
       <Input
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -378,10 +408,16 @@ function QuickAddForm({ planId }: { planId: string }) {
         placeholder="Barang mendadak…"
         aria-label="Nama barang baru"
         disabled={isPending}
+        className="min-w-0"
       />
-      <GameButton type="submit" variant="secondary" size="sm" disabled={isPending || !name.trim()}>
-        <Plus className="h-4 w-4" aria-hidden />
-      </GameButton>
+      <button
+        type="submit"
+        disabled={isPending || !name.trim()}
+        aria-label="Tambah barang"
+        className="tap-target grid shrink-0 place-items-center rounded-xl bg-secondary text-white transition-transform duration-150 active:scale-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <Plus className="h-5 w-5" aria-hidden />
+      </button>
     </form>
   );
 }

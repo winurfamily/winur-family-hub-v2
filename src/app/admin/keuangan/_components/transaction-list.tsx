@@ -1,29 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  ArrowRightLeft,
-  Download,
-  Pencil,
-  Plus,
-  Receipt,
-  Search,
-  ShoppingBag,
-  Trash2,
-} from "lucide-react";
+import { Download, Loader2, Search } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ConfirmDialog } from "@/components/finance/confirm-dialog";
 import { Panel, EmptyState } from "@/components/finance/ui";
-import { IncomeFormSheet } from "./income-form-sheet";
-import { deleteIncome, getIncomeDetail } from "@/app/actions/pendapatan";
-import { deletePocketTransfer } from "@/app/actions/keuangan";
+import { EntryRow } from "./entry-row";
 import { exportLedgerCsv, getLedger, type LedgerEntry, type LedgerKind, type LedgerResult } from "@/app/actions/riwayat";
-import { formatDate, formatRupiah } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const KIND_FILTERS: { id: LedgerKind | "all"; label: string }[] = [
@@ -35,6 +22,16 @@ const KIND_FILTERS: { id: LedgerKind | "all"; label: string }[] = [
 
 const PAGE_SIZE = 25;
 
+/**
+ * Daftar transaksi.
+ *
+ * Cakupan periode bisa dilepas ke "Semua waktu". Ini bukan sekadar kenyamanan:
+ * selama daftar terkunci pada bulan yang sedang dilihat, transaksi bertanggal
+ * bulan lain (mis. gaji yang sengaja dicatat untuk bulan depan) ikut menambah
+ * Saldo Utama tetapi TIDAK PERNAH muncul di layar mana pun — saldonya seolah
+ * datang entah dari mana dan catatannya mustahil dihapus. Dengan "Semua waktu",
+ * setiap rupiah yang memengaruhi saldo selalu punya baris yang bisa dibuka.
+ */
 export function TransactionList({
   initial,
   options,
@@ -52,6 +49,7 @@ export function TransactionList({
   const [kind, setKind] = useState<LedgerKind | "all">("all");
   const [search, setSearch] = useState("");
   const [account, setAccount] = useState("all");
+  const [scope, setScope] = useState<"bulan" | "semua">("bulan");
   const [entries, setEntries] = useState<LedgerEntry[]>(initial.entries);
   const [total, setTotal] = useState(initial.total);
   const [page, setPage] = useState(1);
@@ -66,12 +64,19 @@ export function TransactionList({
   }, [initial]);
 
   const filter = {
-    dateFrom,
-    dateTo,
+    dateFrom: scope === "bulan" ? dateFrom : undefined,
+    dateTo: scope === "bulan" ? dateTo : undefined,
     kinds: kind === "all" ? undefined : [kind],
     search: search.trim() || undefined,
     account: account === "all" ? undefined : account,
   };
+
+  const reload = (targetPage = 1, size = PAGE_SIZE) =>
+    startTransition(async () => {
+      const result = await getLedger({ ...filter, page: 1, pageSize: size * targetPage });
+      setEntries(result.entries);
+      setTotal(result.total);
+    });
 
   // Filter dijalankan ulang dengan jeda 300ms agar mengetik tidak memicu
   // satu query per huruf.
@@ -90,7 +95,7 @@ export function TransactionList({
     }, 300);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, search, account, dateFrom, dateTo]);
+  }, [kind, search, account, scope, dateFrom, dateTo]);
 
   const loadMore = () =>
     startTransition(async () => {
@@ -112,13 +117,18 @@ export function TransactionList({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `riwayat-${dateFrom}-${dateTo}.csv`;
+      link.download = scope === "bulan" ? `riwayat-${dateFrom}-${dateTo}.csv` : "riwayat-semua.csv";
       link.click();
       URL.revokeObjectURL(url);
     });
 
   const grouped = groupByDate(entries);
   const hasMore = entries.length < total;
+
+  const onChanged = () => {
+    router.refresh();
+    reload(page);
+  };
 
   return (
     <div className="space-y-3">
@@ -142,7 +152,7 @@ export function TransactionList({
                 type="button"
                 onClick={() => setKind(option.id)}
                 className={cn(
-                  "tap-target shrink-0 rounded-full px-3.5 text-[13px] font-black transition-colors",
+                  "tap-target shrink-0 rounded-full px-3.5 text-[13px] font-black transition-all duration-150 active:scale-95",
                   kind === option.id ? "bg-primary text-white shadow-card" : "bg-surface-2 text-ink-3"
                 )}
               >
@@ -172,22 +182,56 @@ export function TransactionList({
               onClick={exportCsv}
               disabled={isPending || total === 0}
               aria-label="Export CSV"
-              className="tap-target grid shrink-0 place-items-center rounded-xl border-2 border-border bg-card text-ink-2 transition-colors active:bg-surface-2 disabled:opacity-40"
+              className="tap-target grid shrink-0 place-items-center rounded-xl border-2 border-border bg-card text-ink-2 transition-all duration-150 active:scale-95 active:bg-surface-2 disabled:opacity-40"
             >
               <Download className="h-4 w-4" aria-hidden />
             </button>
           </div>
         </div>
 
-        <p className="text-[11px] font-bold text-ink-3">
-          {total} transaksi{isPending && " · memuat…"}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div
+            role="radiogroup"
+            aria-label="Cakupan periode"
+            className="flex rounded-full bg-surface-2 p-1"
+          >
+            {(
+              [
+                { id: "bulan", label: "Bulan ini" },
+                { id: "semua", label: "Semua waktu" },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={scope === option.id}
+                onClick={() => setScope(option.id)}
+                className={cn(
+                  "min-h-9 rounded-full px-3.5 text-[12px] font-black transition-colors duration-150",
+                  scope === option.id ? "bg-card text-primary shadow-card" : "text-ink-3"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="flex items-center gap-1.5 text-[11px] font-bold text-ink-3">
+            {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+            {total} transaksi
+          </p>
+        </div>
       </Panel>
 
       {grouped.length === 0 ? (
         <EmptyState
           title="Belum ada transaksi"
-          text="Pendapatan, pengeluaran, dan transfer bulan ini akan muncul di sini."
+          text={
+            scope === "bulan"
+              ? "Tidak ada catatan di bulan ini. Coba pilih “Semua waktu” untuk melihat seluruh riwayat."
+              : "Pendapatan, pengeluaran, dan transfer akan muncul di sini setelah dicatat."
+          }
         />
       ) : (
         <div className="space-y-3">
@@ -198,19 +242,7 @@ export function TransactionList({
               </p>
               <ul className="divide-y divide-border">
                 {group.items.map((entry) => (
-                  <EntryRow
-                    key={entry.key}
-                    entry={entry}
-                    pockets={pockets}
-                    onChanged={() => {
-                      router.refresh();
-                      startTransition(async () => {
-                        const result = await getLedger({ ...filter, page: 1, pageSize: PAGE_SIZE * page });
-                        setEntries(result.entries);
-                        setTotal(result.total);
-                      });
-                    }}
-                  />
+                  <EntryRow key={entry.key} entry={entry} pockets={pockets} onChanged={onChanged} />
                 ))}
               </ul>
             </Panel>
@@ -224,140 +256,6 @@ export function TransactionList({
         </div>
       )}
     </div>
-  );
-}
-
-function EntryRow({
-  entry,
-  pockets,
-  onChanged,
-}: {
-  entry: LedgerEntry;
-  pockets: { id: string; name: string }[];
-  onChanged: () => void;
-}) {
-  const [income, setIncome] = useState<Awaited<ReturnType<typeof getIncomeDetail>>>(null);
-  const [, startTransition] = useTransition();
-
-  const positive = entry.kind === "income";
-  const Icon = entry.kind === "income" ? Plus : entry.kind === "transfer" ? ArrowRightLeft : ShoppingBag;
-
-  // Detail pendapatan hanya diambil ketika barisnya benar-benar akan diedit,
-  // bukan untuk seluruh daftar sekaligus.
-  const loadIncome = () =>
-    startTransition(async () => {
-      setIncome(await getIncomeDetail(entry.id));
-    });
-
-  return (
-    <li className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
-      <span
-        aria-hidden
-        className={cn(
-          "grid h-10 w-10 shrink-0 place-items-center rounded-2xl",
-          positive ? "bg-secondary-light text-secondary-dark" : "bg-primary-light text-primary"
-        )}
-      >
-        <Icon className="h-[18px] w-[18px]" />
-      </span>
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[14px] font-bold text-ink-1">{entry.title}</p>
-        <p className="truncate text-[11px] font-semibold text-ink-3">
-          {entry.account}
-          {entry.categoryLabel ? ` · ${entry.categoryLabel}` : ""} · {entry.createdByName}
-          {entry.hasReceipt && " · 📎"}
-        </p>
-      </div>
-
-      <p
-        className={cn(
-          "tabular shrink-0 text-[14px] font-black",
-          positive ? "text-secondary-dark" : entry.kind === "transfer" ? "text-accent" : "text-destructive"
-        )}
-      >
-        {positive ? "+" : entry.kind === "expense" ? "−" : ""}
-        {formatRupiah(entry.amount)}
-      </p>
-
-      <div className="flex shrink-0 items-center gap-1">
-        {entry.kind === "income" && (
-          <>
-            {income ? (
-              <IncomeFormSheet
-                pockets={pockets}
-                income={income}
-                onSaved={onChanged}
-                trigger={
-                  <button
-                    type="button"
-                    aria-label={`Ubah pendapatan ${entry.title}`}
-                    className="tap-target grid place-items-center rounded-xl text-ink-3 active:bg-surface-2"
-                  >
-                    <Pencil className="h-4 w-4" aria-hidden />
-                  </button>
-                }
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={loadIncome}
-                aria-label={`Ubah pendapatan ${entry.title}`}
-                className="tap-target grid place-items-center rounded-xl text-ink-3 active:bg-surface-2"
-              >
-                <Pencil className="h-4 w-4" aria-hidden />
-              </button>
-            )}
-
-            <ConfirmDialog
-              title="Hapus pendapatan?"
-              message={`"${entry.title}" senilai ${formatRupiah(entry.amount)} akan dihapus dan saldo ${entry.account} berkurang kembali sebesar nominal itu.`}
-              successMessage="Pendapatan dihapus dan saldo disesuaikan."
-              onConfirm={() => deleteIncome(entry.id)}
-              onDone={onChanged}
-              trigger={
-                <button
-                  type="button"
-                  aria-label={`Hapus pendapatan ${entry.title}`}
-                  className="tap-target grid place-items-center rounded-xl text-destructive active:bg-destructive/10"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </button>
-              }
-            />
-          </>
-        )}
-
-        {entry.kind === "expense" && (
-          <Link
-            href={`/admin/keuangan/transaksi/${entry.id}`}
-            aria-label={`Detail transaksi ${entry.title}`}
-            className="tap-target grid place-items-center rounded-xl text-ink-3 active:bg-surface-2"
-          >
-            <Receipt className="h-4 w-4" aria-hidden />
-          </Link>
-        )}
-
-        {entry.kind === "transfer" && (
-          <ConfirmDialog
-            title="Hapus riwayat transfer?"
-            message="Hanya catatannya yang hilang. Uang yang sudah berpindah TIDAK dikembalikan — gunakan transfer baru bila ingin memindahkannya kembali."
-            successMessage="Riwayat transfer dihapus."
-            onConfirm={() => deletePocketTransfer(entry.id)}
-            onDone={onChanged}
-            trigger={
-              <button
-                type="button"
-                aria-label={`Hapus riwayat transfer ${entry.title}`}
-                className="tap-target grid place-items-center rounded-xl text-destructive active:bg-destructive/10"
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </button>
-            }
-          />
-        )}
-      </div>
-    </li>
   );
 }
 

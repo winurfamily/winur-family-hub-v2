@@ -3,8 +3,15 @@ import withPWAInit from "@ducanh2912/next-pwa";
 const withPWA = withPWAInit({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
-  cacheOnFrontEndNav: true,
-  aggressiveFrontEndNavCaching: true,
+  // Prefetch-caching navigasi SENGAJA dimatikan. Kedua opsi ini menyimpan
+  // halaman (beserta payload RSC-nya) ke Cache Storage begitu tautannya
+  // terlihat/di-hover, lalu menyajikannya kembali pada kunjungan berikutnya.
+  // Untuk aplikasi keuangan efeknya berbahaya: angka saldo yang sudah berubah
+  // di server masih bisa tampil dari cache perangkat setelah refresh, sehingga
+  // nominal lama seolah "hidup lagi" walau datanya sudah tidak ada.
+  // Aset statis (ikon, font, gambar) tetap di-cache seperti biasa.
+  cacheOnFrontEndNav: false,
+  aggressiveFrontEndNavCaching: false,
   reloadOnOnline: true,
   workboxOptions: {
     disableDevLogs: true,

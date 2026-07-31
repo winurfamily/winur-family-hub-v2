@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings, ShoppingCart, Sparkles, Wallet } from "lucide-react";
@@ -34,6 +35,16 @@ export function AdminShell({
 }) {
   const pathname = usePathname();
   const active = MAIN_NAV.find((item) => isNavActive(pathname, item.href));
+
+  // Bottom sheet & dialog di-portal ke <body>, di luar div ini. Menandai
+  // <html> membuat palet rose ikut berlaku di sana — tanpa itu panel
+  // pencatatan tampil dengan warna tema dasar (biru/oranye).
+  useEffect(() => {
+    document.documentElement.dataset.appScope = "admin";
+    return () => {
+      delete document.documentElement.dataset.appScope;
+    };
+  }, []);
 
   return (
     <div className="admin-shell min-h-screen-dvh bg-background text-ink-1">

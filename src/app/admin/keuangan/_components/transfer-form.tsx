@@ -13,7 +13,18 @@ import { formatRupiah } from "@/lib/format";
 
 const MAIN = "main";
 
-export function TransferForm({ pockets, saldoUtama }: { pockets: PocketSummary[]; saldoUtama: number }) {
+export function TransferForm({
+  pockets,
+  saldoUtama,
+  bare = false,
+  onDone,
+}: {
+  pockets: PocketSummary[];
+  saldoUtama: number;
+  /** Tanpa kartu & judul — dipakai saat form sudah berada di dalam sheet. */
+  bare?: boolean;
+  onDone?: () => void;
+}) {
   const [fromValue, setFromValue] = useState(MAIN);
   const [toValue, setToValue] = useState<string>(pockets[0]?.id ?? "external");
   const [amount, setAmount] = useState(0);
@@ -71,14 +82,21 @@ export function TransferForm({ pockets, saldoUtama }: { pockets: PocketSummary[]
       tokenRef.current = null;
       setAmount(0);
       setNote("");
+      onDone?.();
     });
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 rounded-[20px] bg-card p-4 shadow-card sm:p-5" noValidate>
-      <h2 className="flex items-center gap-2 font-heading text-base font-black text-ink-1">
-        <ArrowRightLeft className="h-4 w-4 text-accent" aria-hidden /> Pindahkan Dana
-      </h2>
+    <form
+      onSubmit={handleSubmit}
+      className={bare ? "space-y-3" : "space-y-3 rounded-[20px] bg-card p-4 shadow-card sm:p-5"}
+      noValidate
+    >
+      {!bare && (
+        <h2 className="flex items-center gap-2 font-heading text-base font-black text-ink-1">
+          <ArrowRightLeft className="h-4 w-4 text-accent" aria-hidden /> Pindahkan Dana
+        </h2>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">

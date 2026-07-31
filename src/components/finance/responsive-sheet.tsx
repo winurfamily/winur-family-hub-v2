@@ -59,9 +59,11 @@ const ResponsiveSheetContent = React.forwardRef<
         {!description && !showTitle && (
           <DialogPrimitive.Description className="sr-only">{title}</DialogPrimitive.Description>
         )}
+        {/* ml-auto: saat judulnya disembunyikan (sr-only) slot kiri menciut,
+            tanpa ini tombol tutup ikut melompat ke kiri. */}
         <DialogPrimitive.Close
           aria-label="Tutup"
-          className="tap-target -mr-1.5 -mt-1.5 flex shrink-0 items-center justify-center rounded-xl text-ink-3 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="tap-target -mr-1.5 -mt-1.5 ml-auto flex shrink-0 items-center justify-center rounded-xl text-ink-3 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="h-5 w-5" />
         </DialogPrimitive.Close>

@@ -311,6 +311,53 @@ d("Alur Belanja (integrasi Supabase)", () => {
     expect(incomeId).toBeTruthy();
   });
 
+  it("pendapatan bertanggal bulan lain tetap menambah saldo dan HARUS terjangkau tanpa filter bulan", async () => {
+    // Inilah kenapa saldo lama terasa "muncul sendiri dan tak bisa dihapus":
+    // satu pendapatan bertanggal bulan berikutnya menambah Saldo Utama, tetapi
+    // daftar transaksi yang terkunci pada bulan berjalan tidak pernah
+    // menampilkannya — jadi tidak ada baris yang bisa dibuka untuk menghapus.
+    await setMainBalance(0);
+    await db.from("income").delete().eq("family_id", familyId);
+
+    const bulanIni = "2026-07-01";
+    const bulanDepan = "2026-08-01";
+
+    const { error } = await db.rpc("fin_create_income", {
+      p_family_id: familyId,
+      p_source: "Gaji bulan depan",
+      p_amount: 4_000_000,
+      p_date: bulanDepan,
+      p_pocket_id: null,
+      p_category: "gaji",
+      p_note: null,
+      p_created_by: actorId,
+      p_client_token: null,
+    });
+    expect(error).toBeNull();
+    expect(await mainBalance()).toBe(4_000_000);
+
+    // Cakupan "bulan ini" (perilaku lama, satu-satunya pilihan) — kosong.
+    const { data: bulanan } = await db
+      .from("income")
+      .select("id, source")
+      .eq("family_id", familyId)
+      .gte("date", bulanIni)
+      .lte("date", "2026-07-31");
+    expect(bulanan ?? []).toHaveLength(0);
+
+    // Cakupan "semua waktu" (pilihan baru) — barisnya muncul dan bisa dihapus.
+    const { data: semua } = await db.from("income").select("id, source").eq("family_id", familyId);
+    expect(semua).toHaveLength(1);
+    expect(semua![0].source).toBe("Gaji bulan depan");
+
+    const { error: deleteError } = await db.rpc("fin_delete_income", {
+      p_income_id: semua![0].id,
+      p_family_id: familyId,
+    });
+    expect(deleteError).toBeNull();
+    expect(await mainBalance()).toBe(0);
+  });
+
   it("menolak menyelesaikan rencana milik keluarga lain", async () => {
     const { data: other } = await db
       .from("families")

@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import * as React from "react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -9,25 +8,19 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  Info,
   Loader2,
-  Plus,
   PiggyBank,
   ReceiptText,
   Target,
   Wallet,
 } from "lucide-react";
-import { GameButton } from "@/components/ui/game-button";
 import { Panel, SectionTitle, SegmentTabs, StatTile, EmptyState } from "@/components/finance/ui";
-import {
-  ResponsiveSheet,
-  ResponsiveSheetContent,
-  ResponsiveSheetTrigger,
-} from "@/components/finance/responsive-sheet";
 import { CalendarCard } from "./calendar-card";
 import { TransactionList } from "./transaction-list";
 import { BudgetPanel } from "./budget-panel";
-import { IncomeFormSheet } from "./income-form-sheet";
-import { ExpenseFormSheet } from "./expense-form-sheet";
+import { RecordBar } from "./record-bar";
+import { EntryRow } from "./entry-row";
 import { TransferForm } from "./transfer-form";
 import { TransferHistoryList } from "./transfer-history";
 import { PocketDialog } from "./pocket-dialog";
@@ -37,7 +30,6 @@ import type { LedgerResult } from "@/app/actions/riwayat";
 import type { BudgetOverview } from "@/app/actions/budget";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/supabase/types";
 import { formatRupiah, formatDate } from "@/lib/format";
-import { cn } from "@/lib/utils";
 
 /** Grafik hanya diunduh saat tab Analitik dibuka. */
 const AnalyticsSection = dynamic(
@@ -120,9 +112,18 @@ export function KeuanganHub({
 
   const pockets = summary?.pockets ?? [];
   const saldoUtama = summary?.saldoUtama ?? 0;
+  const totalKeluarga = summary?.totalKeluarga ?? 0;
   const income = ledger.totals.income;
   const expense = ledger.totals.expense;
   const diff = income - expense;
+
+  /**
+   * Saldo ada, tapi bulan yang sedang dilihat kosong. Tanpa penjelasan ini
+   * angkanya terlihat "muncul sendiri" — padahal sumbernya transaksi di bulan
+   * lain. Petunjuknya sekaligus mengarahkan ke tempat transaksi itu bisa
+   * dibuka dan dihapus.
+   */
+  const saldoTanpaTransaksiBulanIni = totalKeluarga !== 0 && ledger.entries.length === 0;
 
   const goMonth = (delta: number) => {
     const [year, m] = month.split("-").map(Number);
@@ -150,6 +151,7 @@ export function KeuanganHub({
   }, [ledger.entries]);
 
   const [year, monthNumber] = month.split("-").map(Number);
+  const refresh = () => router.refresh();
 
   return (
     <div className="space-y-4 pb-4">
@@ -167,7 +169,7 @@ export function KeuanganHub({
                 type="button"
                 onClick={() => goMonth(-1)}
                 aria-label="Bulan sebelumnya"
-                className="tap-target grid place-items-center rounded-xl bg-white/15 text-white transition active:scale-95"
+                className="tap-target grid place-items-center rounded-xl bg-white/15 text-white transition-transform duration-150 active:scale-90"
               >
                 <ChevronLeft className="h-4 w-4" aria-hidden />
               </button>
@@ -178,7 +180,7 @@ export function KeuanganHub({
                 type="button"
                 onClick={() => goMonth(1)}
                 aria-label="Bulan berikutnya"
-                className="tap-target grid place-items-center rounded-xl bg-white/15 text-white transition active:scale-95"
+                className="tap-target grid place-items-center rounded-xl bg-white/15 text-white transition-transform duration-150 active:scale-90"
               >
                 <ChevronRight className="h-4 w-4" aria-hidden />
               </button>
@@ -186,7 +188,7 @@ export function KeuanganHub({
           </div>
 
           <p className="tabular relative mt-1 break-words font-mono text-[34px] font-black leading-tight sm:text-5xl">
-            {formatRupiah(summary?.totalKeluarga ?? 0)}
+            {formatRupiah(totalKeluarga)}
           </p>
 
           <div className="relative mt-4 grid grid-cols-2 gap-2 sm:max-w-md">
@@ -202,12 +204,32 @@ export function KeuanganHub({
         </div>
       </Panel>
 
-      {/* Tombol "Catat" berada di baris tersendiri pada HP agar tidak menutupi
-          tab yang sedang digeser; di layar lebar keduanya sebaris. */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-        <SegmentTabs tabs={TABS} active={tab} onChange={setTab} className="min-w-0 sm:flex-1" />
-        <QuickAdd pockets={pockets} saldoUtama={saldoUtama} options={options} />
-      </div>
+      {/* Aksi pencatatan: melayang di zona ibu jari pada HP, menyatu di desktop. */}
+      <RecordBar
+        pockets={pockets}
+        saldoUtama={saldoUtama}
+        pocketOptions={options.pockets}
+        onChanged={refresh}
+      />
+
+      <SegmentTabs tabs={TABS} active={tab} onChange={setTab} />
+
+      {saldoTanpaTransaksiBulanIni && (
+        <button
+          type="button"
+          onClick={() => setTab("transaksi")}
+          className="flex w-full items-start gap-2.5 rounded-[18px] bg-accent-light p-3.5 text-left transition-transform duration-150 active:scale-[0.99]"
+        >
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <span className="text-[12px] font-semibold leading-relaxed text-ink-2">
+            Bulan ini belum ada transaksi, tetapi saldo keluarga{" "}
+            <strong className="text-ink-1">{formatRupiah(totalKeluarga)}</strong>. Angkanya berasal dari
+            transaksi bertanggal bulan lain — buka <strong className="text-ink-1">Transaksi</strong> lalu
+            pilih <strong className="text-ink-1">Semua waktu</strong> untuk melihat, mengubah, atau
+            menghapusnya.
+          </span>
+        </button>
+      )}
 
       {/* ---------- Ringkasan ---------- */}
       {tab === "ringkasan" && (
@@ -230,7 +252,7 @@ export function KeuanganHub({
               <button
                 type="button"
                 onClick={() => setTab("transaksi")}
-                className="tap-target shrink-0 rounded-xl px-2 text-xs font-black text-primary"
+                className="tap-target shrink-0 rounded-xl px-2 text-xs font-black text-primary transition-transform duration-150 active:scale-95"
               >
                 Semua
               </button>
@@ -246,7 +268,7 @@ export function KeuanganHub({
                       text={
                         pickedDate
                           ? "Pilih tanggal lain di kalender."
-                          : "Catat pendapatan atau pengeluaran pertama lewat tombol Catat."
+                          : "Catat pendapatan atau pengeluaran pertama lewat tombol besar di bawah."
                       }
                     />
                   </div>
@@ -255,28 +277,13 @@ export function KeuanganHub({
               return (
                 <ul className="divide-y divide-border">
                   {shown.map((entry) => (
-                    <li key={entry.key} className="flex items-center gap-3 px-4 py-2.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[14px] font-bold text-ink-1">{entry.title}</p>
-                        <p className="truncate text-[11px] font-semibold text-ink-3">
-                          {formatDate(entry.date)} · {entry.account}
-                          {entry.categoryLabel ? ` · ${entry.categoryLabel}` : ""}
-                        </p>
-                      </div>
-                      <p
-                        className={cn(
-                          "tabular shrink-0 text-[14px] font-black",
-                          entry.kind === "income"
-                            ? "text-secondary-dark"
-                            : entry.kind === "transfer"
-                              ? "text-accent"
-                              : "text-destructive"
-                        )}
-                      >
-                        {entry.kind === "income" ? "+" : entry.kind === "expense" ? "−" : ""}
-                        {formatRupiah(entry.amount)}
-                      </p>
-                    </li>
+                    <EntryRow
+                      key={entry.key}
+                      entry={entry}
+                      pockets={options.pockets}
+                      onChanged={refresh}
+                      showDate={!pickedDate}
+                    />
                   ))}
                 </ul>
               );
@@ -321,7 +328,7 @@ export function KeuanganHub({
                     trigger={
                       <button
                         type="button"
-                        className="tap-target rounded-xl bg-primary-light px-3 text-xs font-black text-primary"
+                        className="tap-target rounded-xl bg-primary-light px-3 text-xs font-black text-primary transition-transform duration-150 active:scale-95"
                       >
                         Tambah
                       </button>
@@ -366,6 +373,9 @@ export function KeuanganHub({
 
       {/* ---------- Anggaran & kategori ---------- */}
       {tab === "anggaran" && <BudgetPanel overview={budget} month={month} />}
+
+      {/* Ruang bagi bilah aksi mengambang supaya tidak menutupi baris terakhir. */}
+      <div aria-hidden className="h-[68px] lg:hidden" />
     </div>
   );
 }
@@ -378,85 +388,3 @@ function MiniBalance({ label, value }: { label: string; value: number }) {
     </div>
   );
 }
-
-/** Satu tombol "Catat" → pendapatan, pengeluaran umum, atau transfer. */
-function QuickAdd({
-  pockets,
-  saldoUtama,
-  options,
-}: {
-  pockets: FinanceSummary["pockets"];
-  saldoUtama: number;
-  options: { pockets: { id: string; name: string }[] };
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <ResponsiveSheet open={open} onOpenChange={setOpen}>
-      <ResponsiveSheetTrigger asChild>
-        <GameButton type="button" variant="primary" size="sm" className="shrink-0 gap-1.5">
-          <Plus className="h-4 w-4" aria-hidden /> Catat
-        </GameButton>
-      </ResponsiveSheetTrigger>
-      <ResponsiveSheetContent title="Catat transaksi" description="Pilih jenis catatan keuangan.">
-        <div className="grid gap-2">
-          <IncomeFormSheet
-            pockets={options.pockets}
-            trigger={
-              <QuickButton
-                icon={<Plus className="h-5 w-5" />}
-                title="Pendapatan"
-                text="Gaji, usaha, bonus, hadiah"
-              />
-            }
-          />
-          <ExpenseFormSheet
-            pockets={pockets}
-            saldoUtama={saldoUtama}
-            trigger={
-              <QuickButton
-                icon={<ReceiptText className="h-5 w-5" />}
-                title="Pengeluaran umum"
-                text="Tagihan, transportasi, sekolah"
-              />
-            }
-          />
-          <p className="rounded-2xl bg-surface-2 px-3 py-2.5 text-[11px] font-semibold text-ink-3">
-            Untuk transfer antar pocket, buka tab <strong className="text-ink-2">Dompet</strong>.
-          </p>
-        </div>
-      </ResponsiveSheetContent>
-    </ResponsiveSheet>
-  );
-}
-
-/**
- * Dipakai sebagai `trigger` sheet lain, yang meneruskan ref lewat
- * `asChild`. Karena itu WAJIB forwardRef — komponen fungsi biasa membuat
- * React melempar peringatan "Function components cannot be given refs" di
- * konsol setiap kali panel dibuka.
- */
-const QuickButton = React.forwardRef<
-  HTMLButtonElement,
-  React.ButtonHTMLAttributes<HTMLButtonElement> & {
-    icon: React.ReactNode;
-    title: string;
-    text: string;
-  }
->(({ icon, title, text, ...props }, ref) => (
-  <button
-    ref={ref}
-    type="button"
-    className="flex min-h-[64px] w-full items-center gap-3 rounded-2xl bg-surface-2 p-3 text-left transition active:scale-[0.99]"
-    {...props}
-  >
-    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-white">
-      {icon}
-    </span>
-    <span className="min-w-0">
-      <span className="block font-black text-ink-1">{title}</span>
-      <span className="block truncate text-xs font-semibold text-ink-3">{text}</span>
-    </span>
-  </button>
-));
-QuickButton.displayName = "QuickButton";

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CheckCircle2, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, Loader2, Plus, Trash2 } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,10 +43,13 @@ export function CompleteSheet({
   plan,
   items,
   summary,
+  remaining = 0,
 }: {
   plan: PlanView;
   items: PlanItemView[];
   summary: FinanceSummary | null;
+  /** Barang yang belum dicentang — dipakai untuk peringatan halus. */
+  remaining?: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -130,9 +133,16 @@ export function CompleteSheet({
   return (
     <ResponsiveSheet open={open} onOpenChange={(next) => !isPending && setOpen(next)}>
       <ResponsiveSheetTrigger asChild>
-        <GameButton type="button" variant="primary" block className="gap-1.5">
-          <CheckCircle2 className="h-4 w-4" aria-hidden /> Selesaikan Belanja
-        </GameButton>
+        {/* Ringkas di HP (berbagi satu baris dengan input tambah barang),
+            melebar penuh di panel samping desktop. */}
+        <button
+          type="button"
+          className="flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-3.5 text-[13px] font-black text-white shadow-[0_4px_0_var(--primary-dark)] transition-transform duration-150 active:translate-y-[3px] active:shadow-[0_1px_0_var(--primary-dark)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:min-h-12 lg:w-full lg:rounded-2xl lg:text-[15px]"
+        >
+          <CheckCircle2 className="h-4 w-4" aria-hidden />
+          <span className="lg:hidden">Selesai</span>
+          <span className="hidden lg:inline">Selesaikan Belanja</span>
+        </button>
       </ResponsiveSheetTrigger>
 
       <ResponsiveSheetContent
@@ -140,10 +150,18 @@ export function CompleteSheet({
         description="Satu transaksi Pengeluaran kategori Belanja akan dibuat dan saldo berkurang."
       >
         <form onSubmit={submit} className="space-y-3.5" noValidate>
+          {remaining > 0 && (
+            <p className="rounded-xl bg-primary-light px-3 py-2 text-[11px] font-bold text-primary">
+              Masih ada {remaining} barang yang belum dicentang. Rencana tetap bisa diselesaikan — barang
+              itu dianggap tidak jadi dibeli.
+            </p>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="done-total">Total harga yang dibayar</Label>
             <CurrencyInput
               id="done-total"
+              size="hero"
               value={totalPaid}
               onValueChange={setTotalPaid}
               disabled={isPending}
@@ -288,7 +306,13 @@ export function CompleteSheet({
           </Panel>
 
           <GameButton type="submit" variant="primary" block disabled={isPending || total <= 0}>
-            {isPending ? "Memproses…" : "Simpan Transaksi Belanja"}
+            {isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Memproses…
+              </>
+            ) : (
+              "Simpan Transaksi Belanja"
+            )}
           </GameButton>
         </form>
       </ResponsiveSheetContent>

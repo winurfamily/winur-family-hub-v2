@@ -2,32 +2,47 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CurrencyInput } from "@/components/finance/currency-input";
+import { CategoryPicker } from "@/components/finance/category-picker";
 import {
   ResponsiveSheet,
   ResponsiveSheetContent,
   ResponsiveSheetTrigger,
 } from "@/components/finance/responsive-sheet";
 import { addIncome, updateIncome, type IncomeItem } from "@/app/actions/pendapatan";
-import { INCOME_CATEGORIES, INCOME_CATEGORY_LABELS } from "@/lib/supabase/types";
+import { INCOME_VISUAL_LIST } from "@/lib/finance-categories";
 import { todayISODate } from "@/lib/format";
 
 interface IncomeFormSheetProps {
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
   pockets: { id: string; name: string }[];
   /** Diisi untuk mode edit; kosong berarti tambah baru. */
   income?: IncomeItem;
   onSaved?: () => void;
+  /** Boleh dikendalikan dari luar (mis. dari bilah aksi utama / sheet detail). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function IncomeFormSheet({ trigger, pockets, income, onSaved }: IncomeFormSheetProps) {
+export function IncomeFormSheet({
+  trigger,
+  pockets,
+  income,
+  onSaved,
+  open: controlledOpen,
+  onOpenChange,
+}: IncomeFormSheetProps) {
   const isEdit = Boolean(income);
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
+
   const [isPending, startTransition] = useTransition();
   const tokenRef = useRef<string | null>(null);
 
@@ -91,16 +106,40 @@ export function IncomeFormSheet({ trigger, pockets, income, onSaved }: IncomeFor
 
   return (
     <ResponsiveSheet open={open} onOpenChange={(next) => !isPending && setOpen(next)}>
-      <ResponsiveSheetTrigger asChild>{trigger}</ResponsiveSheetTrigger>
+      {trigger && <ResponsiveSheetTrigger asChild>{trigger}</ResponsiveSheetTrigger>}
       <ResponsiveSheetContent
-        title={isEdit ? "Ubah Pendapatan" : "Tambah Pendapatan"}
+        title={isEdit ? "Ubah Pendapatan" : "Catat Pendapatan"}
         description={
           isEdit
             ? "Saldo akan disesuaikan otomatis mengikuti perubahan nominal dan tujuan."
             : "Saldo rekening tujuan bertambah setelah disimpan."
         }
       >
-        <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <div className="space-y-1.5">
+            <Label htmlFor="income-amount">Nominal</Label>
+            <CurrencyInput
+              id="income-amount"
+              size="hero"
+              value={amount}
+              onValueChange={setAmount}
+              disabled={isPending}
+              autoFocus={!isEdit}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Kategori</Label>
+            <CategoryPicker
+              label="Kategori pendapatan"
+              categories={INCOME_VISUAL_LIST}
+              value={category}
+              onChange={setCategory}
+              disabled={isPending}
+              columns={3}
+            />
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="income-source">Sumber pendapatan</Label>
             <Input
@@ -112,17 +151,6 @@ export function IncomeFormSheet({ trigger, pockets, income, onSaved }: IncomeFor
               placeholder="Contoh: Gaji bulanan"
               disabled={isPending}
               required
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="income-amount">Nominal</Label>
-            <CurrencyInput
-              id="income-amount"
-              value={amount}
-              onValueChange={setAmount}
-              disabled={isPending}
-              autoFocus={!isEdit}
             />
           </div>
 
@@ -140,37 +168,21 @@ export function IncomeFormSheet({ trigger, pockets, income, onSaved }: IncomeFor
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="income-category">Kategori</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger id="income-category">
+              <Label htmlFor="income-target">Masuk ke</Label>
+              <Select value={target} onValueChange={setTarget}>
+                <SelectTrigger id="income-target">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {INCOME_CATEGORIES.map((key) => (
-                    <SelectItem key={key} value={key}>
-                      {INCOME_CATEGORY_LABELS[key]}
+                  <SelectItem value="main">Saldo Utama</SelectItem>
+                  {pockets.map((pocket) => (
+                    <SelectItem key={pocket.id} value={pocket.id}>
+                      {pocket.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="income-target">Masuk ke</Label>
-            <Select value={target} onValueChange={setTarget}>
-              <SelectTrigger id="income-target">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="main">Saldo Utama</SelectItem>
-                {pockets.map((pocket) => (
-                  <SelectItem key={pocket.id} value={pocket.id}>
-                    {pocket.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           <div className="space-y-1.5">
@@ -193,7 +205,15 @@ export function IncomeFormSheet({ trigger, pockets, income, onSaved }: IncomeFor
           )}
 
           <GameButton type="submit" variant="secondary" block disabled={isPending}>
-            {isPending ? "Menyimpan…" : isEdit ? "Simpan Perubahan" : "Simpan Pendapatan"}
+            {isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Menyimpan…
+              </>
+            ) : isEdit ? (
+              "Simpan Perubahan"
+            ) : (
+              "Simpan Pendapatan"
+            )}
           </GameButton>
         </form>
       </ResponsiveSheetContent>

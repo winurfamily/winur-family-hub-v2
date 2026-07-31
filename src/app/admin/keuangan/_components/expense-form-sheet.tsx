@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CurrencyInput } from "@/components/finance/currency-input";
+import { CategoryPicker } from "@/components/finance/category-picker";
 import {
   ResponsiveSheet,
   ResponsiveSheetContent,
@@ -16,47 +18,40 @@ import {
 } from "@/components/finance/responsive-sheet";
 import { createShoppingTransaction } from "@/app/actions/belanja";
 import type { PocketSummary } from "@/app/actions/keuangan";
-import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from "@/lib/supabase/types";
+import { MANUAL_EXPENSE_VISUALS } from "@/lib/finance-categories";
 import { formatRupiah, todayISODate } from "@/lib/format";
-
-/**
- * Kategori pengeluaran umum — kategori "Belanja" sengaja TIDAK ada di sini.
- *
- * Pengeluaran belanja hanya boleh lahir dari menu Belanja (rencana, manual,
- * atau scan struk) supaya tidak ada dua jalan masuk untuk hal yang sama.
- */
-const GENERAL_CATEGORIES: ExpenseCategory[] = [
-  "makanan",
-  "rumah",
-  "transportasi",
-  "tagihan",
-  "kesehatan",
-  "pendidikan",
-  "anak",
-  "hiburan",
-  "sosial",
-  "hadiah",
-  "lainnya",
-];
 
 /**
  * Catat satu pengeluaran umum (listrik, bensin, sekolah, ...).
  *
+ * Urutan isian mengikuti cara orang benar-benar mencatat: nominal dulu (paling
+ * penting, langsung fokus & papan angka terbuka), lalu kategori sebagai grid
+ * ikon satu ketukan, baru keterangan dan sisanya.
+ *
  * Disimpan lewat RPC yang sama dengan belanja sehingga pemotongan saldo tetap
  * atomik, tapi tanpa rincian barang: satu baris bernama sama dengan
- * keterangannya.
+ * keterangannya. Kategori "Belanja" sengaja tidak tersedia di sini — hanya
+ * menu Belanja yang boleh melahirkannya.
  */
 export function ExpenseFormSheet({
   trigger,
   pockets,
   saldoUtama,
+  open: controlledOpen,
+  onOpenChange,
 }: {
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
   pockets: PocketSummary[];
   saldoUtama: number;
+  /** Boleh dikendalikan dari luar (mis. dari bilah aksi utama). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
+
   const [isPending, startTransition] = useTransition();
   const tokenRef = useRef<string | null>(null);
 
@@ -122,12 +117,35 @@ export function ExpenseFormSheet({
 
   return (
     <ResponsiveSheet open={open} onOpenChange={(next) => !isPending && setOpen(next)}>
-      <ResponsiveSheetTrigger asChild>{trigger}</ResponsiveSheetTrigger>
+      {trigger && <ResponsiveSheetTrigger asChild>{trigger}</ResponsiveSheetTrigger>}
       <ResponsiveSheetContent
-        title="Tambah Pengeluaran"
+        title="Catat Pengeluaran"
         description="Untuk pengeluaran di luar belanja: tagihan, transportasi, sekolah, dan lainnya."
       >
-        <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <div className="space-y-1.5">
+            <Label htmlFor="expense-amount">Nominal</Label>
+            <CurrencyInput
+              id="expense-amount"
+              size="hero"
+              value={amount}
+              onValueChange={setAmount}
+              disabled={isPending}
+              autoFocus
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Kategori</Label>
+            <CategoryPicker
+              label="Kategori pengeluaran"
+              categories={MANUAL_EXPENSE_VISUALS}
+              value={category}
+              onChange={setCategory}
+              disabled={isPending}
+            />
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="expense-title">Keterangan</Label>
             <Input
@@ -139,17 +157,6 @@ export function ExpenseFormSheet({
               placeholder="Contoh: Token listrik"
               disabled={isPending}
               required
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="expense-amount">Nominal</Label>
-            <CurrencyInput
-              id="expense-amount"
-              value={amount}
-              onValueChange={setAmount}
-              disabled={isPending}
-              autoFocus
             />
           </div>
 
@@ -166,15 +173,16 @@ export function ExpenseFormSheet({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="expense-category">Kategori</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger id="expense-category">
+              <Label htmlFor="expense-source">Sumber dana</Label>
+              <Select value={source} onValueChange={setSource}>
+                <SelectTrigger id="expense-source">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {GENERAL_CATEGORIES.map((key) => (
-                    <SelectItem key={key} value={key}>
-                      {EXPENSE_CATEGORY_LABELS[key]}
+                  <SelectItem value="main">Saldo Utama</SelectItem>
+                  {pockets.map((pocket) => (
+                    <SelectItem key={pocket.id} value={pocket.id}>
+                      {pocket.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -182,25 +190,9 @@ export function ExpenseFormSheet({
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="expense-source">Sumber dana</Label>
-            <Select value={source} onValueChange={setSource}>
-              <SelectTrigger id="expense-source">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="main">Saldo Utama</SelectItem>
-                {pockets.map((pocket) => (
-                  <SelectItem key={pocket.id} value={pocket.id}>
-                    {pocket.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] font-semibold text-ink-3">
-              Tersedia <strong className="text-ink-2">{formatRupiah(available)}</strong>
-            </p>
-          </div>
+          <p className="text-[11px] font-semibold text-ink-3">
+            Tersedia <strong className="text-ink-2">{formatRupiah(available)}</strong>
+          </p>
 
           <div className="space-y-1.5">
             <Label htmlFor="expense-note">Catatan (opsional)</Label>
@@ -222,7 +214,13 @@ export function ExpenseFormSheet({
           )}
 
           <GameButton type="submit" variant="primary" block disabled={isPending}>
-            {isPending ? "Menyimpan…" : "Simpan Pengeluaran"}
+            {isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Menyimpan…
+              </>
+            ) : (
+              "Simpan Pengeluaran"
+            )}
           </GameButton>
         </form>
       </ResponsiveSheetContent>

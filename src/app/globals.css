@@ -90,8 +90,15 @@
   /* Area Ayah/Mamah — identitas visual "Winur Rose".                    */
   /* Satu tema untuk seluruh shell admin (Keuangan, Belanja, Dunia Anak) */
   /* supaya mobile PWA dan desktop SaaS terasa satu aplikasi.            */
+  /*                                                                     */
+  /* Selektor kedua penting: bottom sheet, dialog, dan toast di-portal ke */
+  /* <body>, DI LUAR div .admin-shell. Tanpa itu panel pencatatan memakai */
+  /* palet biru/oranye tema dasar — kategori terpilih jadi oranye dan     */
+  /* cincin fokus ungu, terasa seperti aplikasi lain. AdminShell menandai */
+  /* <html data-app-scope="admin"> selama halaman admin terbuka.          */
   /* ------------------------------------------------------------------ */
-  .admin-shell {
+  .admin-shell,
+  :root[data-app-scope="admin"] {
     --background: #fff7fa;
     --foreground: #3b3036;
     --card: #ffffff;

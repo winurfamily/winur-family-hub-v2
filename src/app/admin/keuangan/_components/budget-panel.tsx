@@ -7,8 +7,8 @@ import { GameButton } from "@/components/ui/game-button";
 import { CurrencyInput } from "@/components/finance/currency-input";
 import { Panel, SectionTitle, ProgressBar, StatTile } from "@/components/finance/ui";
 import { setBudget, type BudgetOverview } from "@/app/actions/budget";
-import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORIES, EXPENSE_CATEGORY_ALIASES } from "@/lib/supabase/types";
-import { INCOME_CATEGORIES, INCOME_CATEGORY_LABELS } from "@/lib/supabase/types";
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_ALIASES } from "@/lib/supabase/types";
+import { expenseVisual, INCOME_VISUAL_LIST, type CategoryVisual } from "@/lib/finance-categories";
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -59,17 +59,12 @@ export function BudgetPanel({ overview, month }: { overview: BudgetOverview; mon
         </p>
 
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <CategoryGroup
-            title="Pendapatan"
-            items={INCOME_CATEGORIES.map((key) => INCOME_CATEGORY_LABELS[key])}
-            tone="good"
-          />
+          <CategoryGroup title="Pendapatan" items={INCOME_VISUAL_LIST} />
           <CategoryGroup
             title="Pengeluaran"
-            items={EXPENSE_CATEGORIES.filter((key) => !(key in EXPENSE_CATEGORY_ALIASES)).map(
-              (key) => EXPENSE_CATEGORY_LABELS[key]
+            items={EXPENSE_CATEGORIES.filter((key) => !(key in EXPENSE_CATEGORY_ALIASES)).map((key) =>
+              expenseVisual(key)
             )}
-            tone="bad"
           />
         </div>
       </Panel>
@@ -77,22 +72,24 @@ export function BudgetPanel({ overview, month }: { overview: BudgetOverview; mon
   );
 }
 
-function CategoryGroup({ title, items, tone }: { title: string; items: string[]; tone: "good" | "bad" }) {
+function CategoryGroup({ title, items }: { title: string; items: CategoryVisual[] }) {
   return (
     <div>
       <p className="text-[11px] font-black uppercase tracking-wide text-ink-3">{title}</p>
       <ul className="mt-2 flex flex-wrap gap-1.5">
-        {items.map((label) => (
-          <li
-            key={label}
-            className={cn(
-              "rounded-full px-2.5 py-1 text-[12px] font-bold",
-              tone === "good" ? "bg-secondary-light text-secondary-dark" : "bg-primary-light text-primary"
-            )}
-          >
-            {label}
-          </li>
-        ))}
+        {items.map((visual) => {
+          const Icon = visual.Icon;
+          return (
+            <li
+              key={visual.key}
+              className="flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2.5 text-[12px] font-bold"
+              style={{ backgroundColor: visual.bg, color: visual.fg }}
+            >
+              <Icon className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden />
+              {visual.label}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -121,11 +118,22 @@ function BudgetRow({
     });
 
   const over = line.amount > 0 && line.spent > line.amount;
+  const visual = expenseVisual(line.categoryKey);
+  const Icon = visual.Icon;
 
   return (
     <li>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-[13px] font-black text-ink-1">{line.label}</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2 text-[13px] font-black text-ink-1">
+          <span
+            aria-hidden
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-xl"
+            style={{ backgroundColor: visual.bg, color: visual.fg }}
+          >
+            <Icon className="h-3.5 w-3.5" strokeWidth={2.4} />
+          </span>
+          <span className="truncate">{line.label}</span>
+        </span>
         <button
           type="button"
           onClick={() => setEditing((value) => !value)}

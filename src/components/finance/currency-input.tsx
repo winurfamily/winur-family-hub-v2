@@ -14,11 +14,13 @@ import { formatNumber } from "@/lib/format";
  */
 export const CurrencyInput = React.forwardRef<
   HTMLInputElement,
-  Omit<React.ComponentProps<"input">, "value" | "onChange" | "type"> & {
+  Omit<React.ComponentProps<"input">, "value" | "onChange" | "type" | "size"> & {
     value: number;
     onValueChange: (value: number) => void;
+    /** "hero" dipakai saat nominal adalah isi utama panel (form pencatatan). */
+    size?: "default" | "hero";
   }
->(({ className, value, onValueChange, disabled, ...props }, ref) => {
+>(({ className, value, onValueChange, disabled, size = "default", ...props }, ref) => {
   const [text, setText] = React.useState(() => (value ? formatNumber(value) : ""));
 
   // Sinkronkan bila nilai diubah dari luar (mis. reset form / autofill harga).
@@ -39,7 +41,10 @@ export const CurrencyInput = React.forwardRef<
     <div className="relative">
       <span
         aria-hidden
-        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base font-bold text-ink-3"
+        className={cn(
+          "pointer-events-none absolute top-1/2 -translate-y-1/2 font-bold text-ink-3",
+          size === "hero" ? "left-4 text-xl" : "left-3.5 text-base"
+        )}
       >
         Rp
       </span>
@@ -53,7 +58,10 @@ export const CurrencyInput = React.forwardRef<
         disabled={disabled}
         placeholder="0"
         className={cn(
-          "tabular flex h-11 w-full rounded-xl border-2 border-input bg-card py-2 pl-10 pr-3.5 text-base font-bold text-ink-1 shadow-sm transition-colors placeholder:font-normal placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50",
+          "tabular flex w-full rounded-xl border-2 border-input bg-card font-bold text-ink-1 shadow-sm transition-colors placeholder:font-normal placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50",
+          size === "hero"
+            ? "h-[60px] rounded-2xl py-2 pl-12 pr-4 font-mono text-[26px] leading-none tracking-tight"
+            : "h-11 py-2 pl-10 pr-3.5 text-base",
           className
         )}
         {...props}

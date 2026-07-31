@@ -327,10 +327,10 @@ export function SetupWizard() {
 
               {step === 3 && (
                 <div className="space-y-4">
-                  <h2 className="font-heading font-extrabold text-xl text-ink-1">Dompet Default</h2>
+                  <h2 className="font-heading font-extrabold text-xl text-ink-1">Dompet Awal</h2>
                   <p className="text-sm text-ink-2">
-                    Dua dompet ini akan otomatis dibuat untuk keluarga kamu. Kamu bisa menambah
-                    dompet lain nanti.
+                    Satu dompet ini dibuat otomatis. Semua saldo dimulai dari Rp0 — catat pendapatan
+                    pertama lewat menu Keuangan setelah setup selesai.
                   </p>
 
                   <div className="flex items-center gap-3 border-2 border-border rounded-2xl p-4 bg-surface-2">
@@ -343,15 +343,11 @@ export function SetupWizard() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 border-2 border-border rounded-2xl p-4 bg-surface-2">
-                    <div className="w-10 h-10 rounded-xl bg-secondary-light flex items-center justify-center">
-                      <PiggyBank className="w-5 h-5 text-secondary" />
-                    </div>
-                    <div>
-                      <p className="font-heading font-bold text-ink-1">Tabungan</p>
-                      <p className="text-xs text-ink-2">Dompet untuk menabung jangka panjang</p>
-                    </div>
-                  </div>
+                  <p className="flex items-center gap-2 text-xs text-ink-2">
+                    <PiggyBank className="w-4 h-4 shrink-0 text-secondary" />
+                    Pocket tabungan tiap anak dibuat sendiri oleh Dunia Anak. Pocket lain bisa ditambah
+                    kapan saja di Keuangan → Dompet.
+                  </p>
                 </div>
               )}
 
@@ -380,7 +376,7 @@ export function SetupWizard() {
                         ))}
                       </ul>
                     </div>
-                    <p className="text-ink-2">Dompet: Belanja, Tabungan</p>
+                    <p className="text-ink-2">Dompet awal: Belanja · Saldo dimulai Rp0</p>
                   </div>
                 </div>
               )}
