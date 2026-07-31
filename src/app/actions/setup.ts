@@ -76,10 +76,14 @@ export async function completeSetup(input: CompleteSetupInput): Promise<Complete
 
   const adminId = admins[0].id as string;
 
-  await supabase.from("pockets").insert([
-    { family_id: familyId, name: "Belanja", type: "default" },
-    { family_id: familyId, name: "Tabungan", type: "default" },
-  ]);
+  // HANYA pocket Belanja yang dibuat otomatis — pocket itu memang dipakai alur
+  // Belanja. Pocket "Tabungan" generik sengaja tidak lagi di-seed: pengguna
+  // bingung karena namanya mirip Tabungan anak, saldonya selalu nol, dan
+  // tidak pernah dipakai fitur apa pun. Pocket lain dibuat sendiri saat
+  // dibutuhkan lewat menu Keuangan → Dompet.
+  await supabase
+    .from("pockets")
+    .insert([{ family_id: familyId, name: "Belanja", type: "custom" }]);
 
   const { weekStart, weekEnd } = currentWeekRange();
 

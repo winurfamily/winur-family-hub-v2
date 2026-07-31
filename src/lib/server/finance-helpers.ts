@@ -52,16 +52,17 @@ export function rpcError(error: PostgrestError | null, fallback: string): string
   return fallback;
 }
 
-/** Bersihkan cache seluruh halaman keuangan setelah mutasi. */
+/**
+ * Bersihkan cache halaman Ayah/Mamah setelah mutasi keuangan.
+ *
+ * `layout` mencakup seluruh sub-rute (mis. /admin/belanja/<planId>), jadi
+ * tidak perlu mendaftarkan tiap halaman satu per satu — itulah yang dulu
+ * membuat halaman baru lupa di-revalidate dan angka lama tetap tampil.
+ */
 export function revalidateKeuangan() {
-  revalidatePath("/admin");
-  revalidatePath("/admin/keuangan");
-  revalidatePath("/admin/keuangan/pockets");
-  revalidatePath("/admin/keuangan/transfer");
-  revalidatePath("/admin/keuangan/pendapatan");
-  revalidatePath("/admin/keuangan/riwayat");
-  revalidatePath("/admin/keuangan/belanja");
-  revalidatePath("/admin/keuangan/storage");
+  revalidatePath("/admin/keuangan", "layout");
+  revalidatePath("/admin/belanja", "layout");
+  revalidatePath("/admin/pengaturan", "layout");
 }
 
 /** Pastikan nominal rupiah selalu bilangan bulat & wajar (I.9). */

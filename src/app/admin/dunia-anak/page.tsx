@@ -10,12 +10,12 @@ export default async function DuniaAnakPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="font-heading font-extrabold text-2xl text-ink-1 flex items-center gap-2">
-          <Sparkles className="w-6 h-6 text-accent" /> Dunia Anak
-        </h1>
-        <p className="text-sm text-ink-2">Pilih anak untuk kelola tugas, investasi, dan lainnya.</p>
-      </div>
+      {/* Judul "Dunia Anak" sudah dibawa header cangkang, jadi di sini cukup
+          kalimat pengarahnya saja agar tidak tampil dua kali. */}
+      <p className="flex items-center gap-2 text-sm font-semibold text-ink-2">
+        <Sparkles className="h-5 w-5 shrink-0 text-accent" aria-hidden />
+        Pilih anak untuk kelola tugas, investasi, dan lainnya.
+      </p>
 
       {children.length === 0 ? (
         <div className="rounded-2xl border-2 border-border bg-card shadow-card p-6 text-center text-sm text-ink-2">

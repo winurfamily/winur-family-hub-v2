@@ -15,7 +15,7 @@ import {
   type ActionResult,
 } from "@/lib/server/finance-helpers";
 import { syncChildSaldoFromPocket } from "@/lib/server/child-savings";
-import { normalizeProductName, currentMonth, monthRange } from "@/lib/finance";
+import { normalizeProductName, currentMonth, monthRange, lastMonths } from "@/lib/finance";
 import type { PocketType } from "@/lib/supabase/types";
 
 export type { ActionResult };
@@ -118,6 +118,61 @@ export async function getFinanceSummary(): Promise<FinanceSummary | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Tren bulanan (grafik analitik)
+// ---------------------------------------------------------------------------
+
+export interface MonthlyTrendPoint {
+  month: string;
+  income: number;
+  expense: number;
+}
+
+/**
+ * Ringkasan pendapatan & pengeluaran beberapa bulan terakhir.
+ *
+ * Dua query rentang penuh lalu diagregasi di memori — jauh lebih murah
+ * daripada 2×N query per bulan yang dipakai dashboard lama.
+ */
+export async function getMonthlyTrend(months = 6, endMonth?: string): Promise<MonthlyTrendPoint[]> {
+  const session = await requireFinanceSession();
+  const span = Math.min(12, Math.max(1, months));
+  const list = lastMonths(span, endMonth ?? currentMonth());
+  const empty = list.map((month) => ({ month, income: 0, expense: 0 }));
+  if (!session) return empty;
+
+  const start = monthRange(list[0]).start;
+  const end = monthRange(list[list.length - 1]).end;
+
+  const supabase = createAdminClient();
+  const [incomeRes, expenseRes] = await Promise.all([
+    supabase
+      .from("income")
+      .select("amount, date")
+      .eq("family_id", session.familyId)
+      .gte("date", start)
+      .lte("date", end),
+    supabase
+      .from("shopping_transactions")
+      .select("total, date")
+      .eq("family_id", session.familyId)
+      .gte("date", start)
+      .lte("date", end),
+  ]);
+
+  const byMonth = new Map(empty.map((point) => [point.month, { ...point }]));
+  for (const row of incomeRes.data ?? []) {
+    const bucket = byMonth.get(String(row.date).slice(0, 7));
+    if (bucket) bucket.income += Number(row.amount);
+  }
+  for (const row of expenseRes.data ?? []) {
+    const bucket = byMonth.get(String(row.date).slice(0, 7));
+    if (bucket) bucket.expense += Number(row.total);
+  }
+
+  return list.map((month) => byMonth.get(month)!);
+}
+
+// ---------------------------------------------------------------------------
 // Pocket manager
 // ---------------------------------------------------------------------------
 
@@ -207,6 +262,24 @@ export async function deletePocket(id: string): Promise<ActionResult> {
   if (!pocket) return { success: false, error: "Pocket tidak ditemukan." };
   if (Number(pocket.balance) > 0) {
     return { success: false, error: "Pindahkan saldo pocket ini ke pocket lain sebelum menghapus." };
+  }
+
+  // Pocket "Tabungan {nama anak}" adalah cermin celengan Dunia Anak.
+  // Menghapusnya memutus sinkronisasi saldo anak, jadi ditolak walau saldonya
+  // sedang nol.
+  const childMatch = pocket.name.match(/^Tabungan (.+)$/i);
+  if (childMatch) {
+    const { data: child } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("family_id", session.familyId)
+      .eq("role", "child")
+      .ilike("name", childMatch[1])
+      .maybeSingle();
+
+    if (child) {
+      return { success: false, error: `"${pocket.name}" dipakai Dunia Anak dan tidak bisa dihapus.` };
+    }
   }
 
   // family_id ikut difilter di DELETE, bukan hanya di SELECT pengecekan.

@@ -1,34 +1,40 @@
-import { getFinanceSummary, getTransferHistory } from "@/app/actions/keuangan";
+import { getFinanceSummary, getMonthlyTrend, getTransferHistory } from "@/app/actions/keuangan";
 import { getIncomeFilterOptions } from "@/app/actions/pendapatan";
 import { getLedger } from "@/app/actions/riwayat";
-import { getShoppingHistory } from "@/app/actions/belanja";
-import { getShoppingPlans } from "@/app/actions/rencana";
+import { getBudgetOverview } from "@/app/actions/budget";
 import { currentMonth, monthRange } from "@/lib/finance";
-import { ParentFinanceApp } from "./_components/parent-finance-app";
+import { KeuanganHub } from "./_components/keuangan-hub";
 
 export const dynamic = "force-dynamic";
 
-export default async function KeuanganDashboardPage() {
-  const month = currentMonth();
+export default async function KeuanganPage({
+  searchParams,
+}: {
+  searchParams?: { bulan?: string };
+}) {
+  const month = /^\d{4}-\d{2}$/.test(searchParams?.bulan ?? "") ? searchParams!.bulan! : currentMonth();
   const { start, end } = monthRange(month);
-  const [summary, ledger, options, plans, shoppingHistory, transfers] = await Promise.all([
+
+  const [summary, ledger, options, transfers, trend, budget] = await Promise.all([
     getFinanceSummary(),
-    getLedger({ page: 1, pageSize: 100, dateFrom: start, dateTo: end }),
+    getLedger({ page: 1, pageSize: 25, dateFrom: start, dateTo: end }),
     getIncomeFilterOptions(),
-    getShoppingPlans(),
-    getShoppingHistory(month),
-    getTransferHistory(1, 8),
+    getTransferHistory(1, 10),
+    getMonthlyTrend(6, month),
+    getBudgetOverview(month),
   ]);
 
   return (
-    <ParentFinanceApp
+    <KeuanganHub
       month={month}
       summary={summary}
       ledger={ledger}
       options={options}
-      plans={plans}
-      shoppingHistory={shoppingHistory}
       transfers={transfers}
+      trend={trend}
+      budget={budget}
+      dateFrom={start}
+      dateTo={end}
     />
   );
 }

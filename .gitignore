@@ -51,3 +51,6 @@ public/swe-worker-*.js.map
 .env
 .env.*
 !.env.example
+
+# Referensi desain lokal (screenshot aplikasi lain) — tidak ikut repo.
+/Docs/DESAIN REVISI/

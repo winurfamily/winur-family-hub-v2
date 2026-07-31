@@ -12,6 +12,7 @@ import {
   type ActionResult,
 } from "@/lib/server/finance-helpers";
 import { createShoppingTransaction } from "@/app/actions/belanja";
+import { distributeTotal } from "@/lib/shopping-total";
 import type { ShoppingPlanStatus, ShoppingPlanItemStatus } from "@/lib/supabase/types";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,8 @@ export interface PlanItemView {
   estimatedPrice: number;
   actualPrice: number | null;
   status: ShoppingPlanItemStatus;
+  /** Satuan barang ("kg", "kotak"). Disimpan di kolom `note`. */
+  unit: string | null;
   note: string | null;
   transactionId: string | null;
   estimatedSubtotal: number;
@@ -164,6 +167,7 @@ export async function getShoppingPlans(includeArchived = false): Promise<PlanVie
           estimatedPrice: estimated,
           actualPrice: actual,
           status: i.status,
+          unit: i.note,
           note: i.note,
           transactionId: i.transaction_id,
           estimatedSubtotal: Math.round(estimated * qty),
@@ -382,7 +386,8 @@ export interface PlanItemMutationInput {
   name: string;
   qty: number;
   estimatedPrice: number;
-  note?: string;
+  /** Satuan barang. Disimpan di kolom `note` (belum ada kolom `unit`). */
+  unit?: string;
 }
 
 function validateItem(input: PlanItemMutationInput): string | null {
@@ -421,7 +426,7 @@ export async function addPlanItem(planId: string, input: PlanItemMutationInput):
     name: input.name.trim(),
     qty: Number(input.qty),
     estimated_price: toRupiah(input.estimatedPrice),
-    note: input.note?.trim() || null,
+    note: input.unit?.trim().slice(0, 20) || null,
     position: count ?? 0,
     status: "pending",
     checked: false,
@@ -432,6 +437,89 @@ export async function addPlanItem(planId: string, input: PlanItemMutationInput):
   await recalcPlanTotals(supabase, planId);
   revalidateKeuangan();
   return { success: true };
+}
+
+export interface BulkPlanItemInput {
+  name: string;
+  qty: number;
+  estimatedPrice?: number;
+  /** Satuan ("kg", "liter", ...). Disimpan di kolom `note`. */
+  unit?: string;
+}
+
+/**
+ * Tambah banyak barang sekaligus — hasil fitur "tempel daftar belanja".
+ *
+ * Satu INSERT untuk seluruh daftar supaya menempel 40 barang tetap satu
+ * round-trip, dan posisinya melanjutkan barang yang sudah ada.
+ *
+ * Satuan disimpan di kolom `note` karena shopping_plan_items belum punya
+ * kolom `unit`; UI menampilkannya sebagai chip satuan di samping kuantitas.
+ */
+export async function addPlanItemsBulk(
+  planId: string,
+  items: BulkPlanItemInput[]
+): Promise<ActionResult<{ added: number }>> {
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: false, error: "Tidak ada barang untuk ditambahkan." };
+  }
+  if (items.length > 100) {
+    return { success: false, error: "Maksimal 100 barang sekali tempel." };
+  }
+
+  const supabase = createAdminClient();
+  if (!(await assertPlanOwnership(supabase, session.familyId, planId))) {
+    return { success: false, error: "Rencana tidak ditemukan." };
+  }
+
+  const clean: { name: string; qty: number; price: number; unit: string | null }[] = [];
+  for (const raw of items) {
+    const name = String(raw?.name ?? "").trim();
+    if (!name) continue; // baris kosong diabaikan, bukan menggagalkan seluruh tempelan
+    if (name.length > 80) return { success: false, error: `Nama barang "${name.slice(0, 20)}…" terlalu panjang.` };
+
+    const qty = Number(raw?.qty);
+    const price = toRupiah(raw?.estimatedPrice ?? 0);
+    clean.push({
+      name,
+      qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
+      price: Number.isFinite(price) && price > 0 ? price : 0,
+      unit: raw?.unit?.trim() ? raw.unit.trim().slice(0, 20) : null,
+    });
+  }
+
+  if (clean.length === 0) return { success: false, error: "Tidak ada barang yang bisa dibaca." };
+
+  const { count } = await supabase
+    .from("shopping_plan_items")
+    .select("id", { count: "exact", head: true })
+    .eq("plan_id", planId);
+
+  const offset = count ?? 0;
+  const { error } = await supabase.from("shopping_plan_items").insert(
+    clean.map((item, index) => ({
+      plan_id: planId,
+      name: item.name,
+      qty: item.qty,
+      estimated_price: item.price,
+      note: item.unit,
+      position: offset + index,
+      status: "pending" as const,
+      checked: false,
+    }))
+  );
+
+  if (error) return { success: false, error: "Gagal menambah barang." };
+
+  await recalcPlanTotals(supabase, planId);
+  await logAudit(supabase, session.familyId, session.profileId, "shopping_plan", planId, "bulk_add_items", null, {
+    added: clean.length,
+  });
+  revalidateKeuangan();
+  return { success: true, data: { added: clean.length } };
 }
 
 export async function updatePlanItem(itemId: string, input: PlanItemMutationInput): Promise<ActionResult> {
@@ -451,7 +539,7 @@ export async function updatePlanItem(itemId: string, input: PlanItemMutationInpu
       name: input.name.trim(),
       qty: Number(input.qty),
       estimated_price: toRupiah(input.estimatedPrice),
-      note: input.note?.trim() || null,
+      note: input.unit?.trim().slice(0, 20) || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", itemId);
@@ -491,6 +579,35 @@ export async function setPlanItemStatus(
   return { success: true };
 }
 
+/**
+ * Ubah kuantitas satu barang saja.
+ *
+ * Dipakai checklist di toko: pengguna hanya menekan −/+ dan tidak boleh
+ * dipaksa mengisi ulang nama & harga seperti pada updatePlanItem().
+ */
+export async function setPlanItemQty(itemId: string, qty: number): Promise<ActionResult> {
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+
+  const nextQty = Number(qty);
+  if (!Number.isFinite(nextQty) || nextQty <= 0) return { success: false, error: "Kuantitas harus lebih dari 0." };
+
+  const supabase = createAdminClient();
+  const item = await resolveOwnedItem(supabase, session.familyId, itemId);
+  if (!item) return { success: false, error: "Barang tidak ditemukan." };
+
+  const { error } = await supabase
+    .from("shopping_plan_items")
+    .update({ qty: nextQty, updated_at: new Date().toISOString() })
+    .eq("id", itemId);
+
+  if (error) return { success: false, error: "Gagal memperbarui kuantitas." };
+
+  await recalcPlanTotals(supabase, item.plan_id);
+  revalidateKeuangan();
+  return { success: true };
+}
+
 export async function deletePlanItem(itemId: string): Promise<ActionResult> {
   const session = await requireFinanceSession();
   if (!session) return { success: false, error: FORBIDDEN };
@@ -522,6 +639,12 @@ export interface CheckoutPlanItemInput {
   clientToken?: string;
 }
 
+export interface ExtraShoppingItemInput {
+  name: string;
+  qty: number;
+  price?: number;
+}
+
 export interface CompleteShoppingPlanInput {
   planId: string;
   source: string;
@@ -529,6 +652,15 @@ export interface CompleteShoppingPlanInput {
   merchant: string;
   note?: string;
   actualPrices?: Record<string, number>;
+  /** Barang yang dibeli di luar rencana (barang tambahan). */
+  extraItems?: ExtraShoppingItemInput[];
+  /**
+   * Total yang benar-benar dibayar di kasir. Bila diisi dan berbeda dari
+   * jumlah rincian, selisihnya dicatat sebagai satu baris penyesuaian agar
+   * total transaksi persis sama dengan struk.
+   */
+  totalPaid?: number;
+  receiptIds?: string[];
   clientToken?: string;
 }
 
@@ -545,6 +677,8 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
     return { success: false, error: "Rencana tidak ditemukan." };
   }
 
+  // Penjaga transaksi ganda #1: satu rencana hanya boleh punya satu transaksi.
+  // (Penjaga #2 adalah client_token idempotency di dalam RPC fin_create_shopping.)
   const { data: existingTx } = await supabase
     .from("shopping_transactions")
     .select("id")
@@ -563,7 +697,22 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
     .order("position");
 
   const active = (rows ?? []).filter((item) => item.status !== "cancelled");
-  if (active.length === 0) return { success: false, error: "Tidak ada barang aktif untuk diselesaikan." };
+  const extras = (input.extraItems ?? [])
+    .map((raw) => {
+      const name = String(raw?.name ?? "").trim();
+      const qty = Number(raw?.qty);
+      const price = toRupiah(raw?.price ?? 0);
+      return {
+        name,
+        qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
+        price: Number.isFinite(price) && price >= 0 ? price : 0,
+      };
+    })
+    .filter((item) => item.name.length > 0 && item.name.length <= 80);
+
+  if (active.length === 0 && extras.length === 0) {
+    return { success: false, error: "Tidak ada barang aktif untuk diselesaikan." };
+  }
   if (active.some((item) => item.transaction_id)) {
     return { success: false, error: "Sebagian barang sudah pernah dicatat sebagai transaksi." };
   }
@@ -578,28 +727,38 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
     };
   });
 
+  items.push(...extras);
+
+  // Total yang dibayar di kasir adalah kebenaran akhir: harga rincian
+  // diselaraskan agar jumlahnya persis sama (lihat lib/shopping-total.ts).
+  const totalPaid = toRupiah(input.totalPaid ?? 0);
+  const finalItems =
+    Number.isFinite(totalPaid) && totalPaid > 0 ? distributeTotal(items, totalPaid) : items;
+
   const result = await createShoppingTransaction({
     merchant,
     date: input.date,
     source: input.source,
     category: "belanja",
     note: input.note,
-    items,
+    items: finalItems,
     origin: "plan",
     planId: input.planId,
+    receiptIds: input.receiptIds,
     clientToken: input.clientToken,
   });
 
   if (!result.success || !result.data) return result;
 
-  for (const item of active) {
-    const actual = toRupiah(prices[item.id] ?? item.actual_price ?? item.estimated_price);
+  // `finalItems` diawali oleh barang rencana dengan urutan yang sama dengan
+  // `active`, jadi harga hasil penyelarasan bisa dipetakan balik per barang.
+  for (const [index, item] of active.entries()) {
     await supabase
       .from("shopping_plan_items")
       .update({
         status: "bought",
         checked: true,
-        actual_price: Number.isFinite(actual) && actual >= 0 ? actual : item.estimated_price,
+        actual_price: finalItems[index]?.price ?? Number(item.estimated_price),
         transaction_id: result.data.id,
         updated_at: new Date().toISOString(),
       })

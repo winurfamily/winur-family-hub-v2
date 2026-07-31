@@ -452,6 +452,26 @@ export type ShoppingTransactionItemRow = {
   created_at: string;
 };
 
+/**
+ * Anggaran bulanan per kategori (migration 0022 — opsional).
+ *
+ * Bila migration itu belum dijalankan, tabelnya tidak ada dan
+ * `getBudgetOverview()` mengembalikan `ready: false` alih-alih melempar error.
+ */
+export type MonthlyBudgetRow = {
+  id: string;
+  family_id: string;
+  /** "YYYY-MM" */
+  month: string;
+  category_key: string | null;
+  amount: number;
+  alert_75: boolean;
+  alert_90: boolean;
+  alert_100: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ReceiptAttachmentRow = {
   id: string;
   family_id: string;
@@ -677,6 +697,17 @@ export interface Database {
         | "height"
         | "uploaded_by"
         | "created_at"
+      >;
+      monthly_budgets: Helper<
+        MonthlyBudgetRow,
+        | "id"
+        | "category_key"
+        | "amount"
+        | "alert_75"
+        | "alert_90"
+        | "alert_100"
+        | "created_at"
+        | "updated_at"
       >;
       room_themes: Helper<RoomThemeRow, "id" | "created_at">;
     };

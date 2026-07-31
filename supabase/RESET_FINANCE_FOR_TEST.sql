@@ -51,7 +51,6 @@ begin
       where p.family_id = v_family_id
     )),
     ('receipt_attachments', (select count(*) from receipt_attachments where family_id = v_family_id)),
-    ('monthly_budgets', (select count(*) from monthly_budgets where family_id = v_family_id)),
     ('receipt_storage_objects', (
       select count(*)
       from storage.objects
@@ -108,7 +107,12 @@ begin
 
   delete from shopping_transactions where family_id = v_family_id;
   delete from shopping_plans where family_id = v_family_id;
-  delete from monthly_budgets where family_id = v_family_id;
+  -- monthly_budgets berasal dari migration 0022 yang opsional. Referensinya
+  -- harus dinamis: SQL statis ke tabel yang belum ada akan gagal saat plan,
+  -- bahkan di dalam IF.
+  if to_regclass('public.monthly_budgets') is not null then
+    execute format('delete from monthly_budgets where family_id = %L', v_family_id);
+  end if;
   delete from pocket_transfers where family_id = v_family_id;
   delete from income where family_id = v_family_id;
 

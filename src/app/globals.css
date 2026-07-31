@@ -86,29 +86,12 @@
     --text-3: #6B8CAE;
   }
 
-  /* Area Admin — "Family Command Center" (Slate & Warm), di-scope lewat .admin-shell */
+  /* ------------------------------------------------------------------ */
+  /* Area Ayah/Mamah — identitas visual "Winur Rose".                    */
+  /* Satu tema untuk seluruh shell admin (Keuangan, Belanja, Dunia Anak) */
+  /* supaya mobile PWA dan desktop SaaS terasa satu aplikasi.            */
+  /* ------------------------------------------------------------------ */
   .admin-shell {
-    --background: #F4F5F7;
-    --foreground: #1C1E26;
-    --card: #FFFFFF;
-    --card-foreground: #1C1E26;
-    --surface: #FFFFFF;
-    --surface-2: #ECEEF2;
-    --popover: #FFFFFF;
-    --popover-foreground: #1C1E26;
-    --border: #E4E7EC;
-    --border-dark: #D2D7DE;
-    --input: #E4E7EC;
-    --muted: #ECEEF2;
-    --muted-foreground: #9AA0AE;
-    --text-1: #1C1E26;
-    --text-2: #5A5F6E;
-    --text-3: #9AA0AE;
-    --shadow-card: 0 8px 24px rgba(28, 30, 38, 0.08);
-    --shadow-card-deep: 0 16px 40px rgba(28, 30, 38, 0.16);
-  }
-
-  .parent-finance-app {
     --background: #fff7fa;
     --foreground: #3b3036;
     --card: #ffffff;
@@ -117,9 +100,9 @@
     --surface-2: #fff0f6;
     --popover: #ffffff;
     --popover-foreground: #3b3036;
-    --border: #f5c9d9;
+    --border: #f6dbe6;
     --border-dark: #eaa6bf;
-    --input: #f5c9d9;
+    --input: #f2cddc;
     --muted: #fff0f6;
     --muted-foreground: #9b7d8a;
     --text-1: #3b3036;
@@ -135,6 +118,8 @@
     --accent-dark: #715ac8;
     --accent-light: #f1edff;
     --ring: #ef5b93;
+    --destructive: #f05a64;
+    --success: #3ca85f;
     --shadow-card: 0 10px 26px rgba(120, 55, 82, 0.1);
     --shadow-card-deep: 0 22px 58px rgba(120, 55, 82, 0.18);
   }
@@ -288,6 +273,18 @@
   /* Angka keuangan: rata kolom & mudah dibandingkan. */
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Header bergradasi rose — dipakai kartu saldo & hero halaman admin. */
+  .bg-rose-hero {
+    background: linear-gradient(135deg, #f4699c 0%, #ef5b93 45%, #e0407c 100%);
+  }
+
+  /* Kartu putih standar area admin. */
+  .card-soft {
+    background: var(--card);
+    border-radius: 24px;
+    box-shadow: var(--shadow-card);
   }
 
   /* Glassmorphism — panel game premium, dipakai di seluruh Dunia Anak */

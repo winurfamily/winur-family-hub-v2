@@ -74,9 +74,13 @@ export function ProfilePicker({ profiles, familyId }: ProfilePickerProps) {
             Belum ada profil. Silakan selesaikan setup terlebih dahulu.
           </p>
         ) : (
-          /* 2 kolom proporsional di HP (320–430px), melebar jadi satu baris
-             kartu di tablet/desktop. Tidak ada scroll horizontal di lebar mana pun. */
-          <div className="grid w-full max-w-[420px] grid-cols-2 gap-3 min-[380px]:gap-4 sm:max-w-none sm:grid-flow-col sm:auto-cols-[150px] sm:gap-5">
+          /* Grid dengan kolom berukuran SAMA di semua lebar layar.
+             `grid-flow-col + auto-cols` yang dipakai sebelumnya membuat kartu
+             Ayah/Mamah melar mengikuti panjang namanya sehingga jauh lebih
+             lebar daripada kartu anak di desktop. `grid-cols-N` menjaga tiap
+             kolom identik, dan `max-w` mencegah kartu melebar berlebihan di
+             layar 1920px. */
+          <div className="grid w-full max-w-[420px] grid-cols-2 gap-3 min-[380px]:gap-4 sm:max-w-[640px] sm:grid-cols-4 sm:gap-5 lg:max-w-[780px] lg:gap-6">
             {profiles.map((profile, i) => (
               <ProfileCard key={profile.id} profile={profile} index={i} onSelect={() => handleSelect(profile)} />
             ))}
@@ -109,7 +113,7 @@ function ProfileCard({
       onClick={onSelect}
       aria-label={`Masuk sebagai ${profile.name}`}
       style={{ boxShadow: "0 10px 30px rgba(28,30,38,.18)" }}
-      className="flex min-h-[150px] w-full flex-col items-center justify-center rounded-[22px] border-[3px] border-transparent bg-white p-3 text-center transition-transform focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white sm:min-h-[170px] sm:p-4 sm:hover:-translate-y-2"
+      className="flex aspect-[4/5] min-h-[150px] w-full flex-col items-center justify-center rounded-[22px] border-[3px] border-transparent bg-white p-3 text-center transition-transform focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white sm:min-h-[180px] sm:p-4 sm:hover:-translate-y-2"
     >
       <AvatarDisplay
         src={profile.photoUrl}
@@ -118,7 +122,7 @@ function ProfileCard({
         size={64}
         className="!border-0 sm:!h-[74px] sm:!w-[74px]"
       />
-      <span className="mt-2 line-clamp-1 font-heading text-[15px] font-black text-ink-1 sm:text-[17px]">
+      <span className="mt-2 line-clamp-1 w-full font-heading text-[15px] font-black text-ink-1 sm:text-[17px]">
         {profile.name}
       </span>
       <span

@@ -51,7 +51,7 @@ export function DeleteTransactionButton({
       }
       toast.success("Transaksi dihapus & dana dikembalikan.");
       setOpen(false);
-      router.replace("/admin/keuangan/belanja/riwayat");
+      router.replace("/admin/keuangan");
       router.refresh();
     });
   };
