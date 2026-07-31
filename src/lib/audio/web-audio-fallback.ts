@@ -102,7 +102,6 @@ export function playFallbackSfx(name: SfxName, volume = 1) {
 
 /* ---- BGM fallback (melodi sederhana per track) ---- */
 const BGM_MELODIES: Record<BgmTrack, { mel: number[]; bass: number[]; step: number }> = {
-  login: { mel: [392, 440, 494, 440, 392, 349, 392, 440], bass: [196, 196, 220, 220, 196, 196, 175, 175], step: 320 },
   daffa_room: {
     mel: [523, 659, 784, 659, 523, 659, 880, 784, 698, 587, 523, 587, 659, 523, 440, 523],
     bass: [131, 131, 196, 196, 165, 165, 131, 131, 175, 175, 147, 147, 131, 131, 98, 98],

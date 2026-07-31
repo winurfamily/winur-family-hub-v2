@@ -252,7 +252,7 @@ Next.js 14 App Router, TS strict, Tailwind + shadcn/ui, Motion (Framer Motion), 
 ## .env.local (sudah ada, jangan ubah credentials)
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://rbcognkvhrkemlsbkmqa.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJiY29nbmt2aHJrZW1sc2JrbXFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTY2MDUsImV4cCI6MjA5NjA5MjYwNX0.jDfYzmrpPlBJWDphJkr1EFVog1WVCTHzoz9m6W_c8_c
+NEXT_PUBLIC_SUPABASE_ANON_KEY=(lihat .env.local — jangan tulis kunci di repo)
 OPENAI_API_KEY=(isi sendiri)
 # opsional voice premium:
 ELEVENLABS_API_KEY=

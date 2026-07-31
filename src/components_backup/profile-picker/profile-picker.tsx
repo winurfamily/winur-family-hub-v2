@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AvatarDisplay } from "@/components/shared/avatar-display";
 import { colorForName } from "@/lib/avatar-color";
-import { PinEntry } from "@/components/pin/pin-entry";
+import { PinEntry } from "../pin/pin-entry";
 import { soundManager } from "@/lib/sound/sound-manager";
 import { hexToRgba } from "@/lib/utils";
 import type { PickerProfile } from "@/app/actions/auth";

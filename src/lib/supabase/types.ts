@@ -25,8 +25,55 @@ export type PocketTransferToType = "main" | "pocket" | "external";
 export type InvestmentStatus = "active" | "completed" | "confirmed";
 export type WithdrawalStatus = "pending" | "approved" | "rejected";
 export type PointRequestStatus = "pending" | "approved" | "rejected";
-export type ShoppingPlanStatus = "planned" | "done" | "archived";
+export type ShoppingPlanStatus = "draft" | "active" | "done" | "cancelled" | "archived";
+export type ShoppingPlanItemStatus = "pending" | "bought" | "cancelled";
 export type ShoppingTransactionSource = "manual" | "scan" | "plan";
+
+/** Kategori pengeluaran belanja (F2.5). Nilai disimpan sebagai text di DB. */
+export const EXPENSE_CATEGORIES = [
+  "makanan",
+  "belanja_rumah",
+  "transportasi",
+  "pendidikan",
+  "kesehatan",
+  "tagihan",
+  "anak",
+  "hiburan",
+  "lainnya",
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  makanan: "Makanan",
+  belanja_rumah: "Belanja Rumah",
+  transportasi: "Transportasi",
+  pendidikan: "Pendidikan",
+  kesehatan: "Kesehatan",
+  tagihan: "Tagihan",
+  anak: "Anak",
+  hiburan: "Hiburan",
+  lainnya: "Lainnya",
+};
+
+/** Kategori pendapatan. */
+export const INCOME_CATEGORIES = [
+  "gaji",
+  "usaha",
+  "bonus",
+  "hadiah",
+  "investasi",
+  "lainnya",
+] as const;
+export type IncomeCategory = (typeof INCOME_CATEGORIES)[number];
+
+export const INCOME_CATEGORY_LABELS: Record<IncomeCategory, string> = {
+  gaji: "Gaji",
+  usaha: "Usaha",
+  bonus: "Bonus",
+  hadiah: "Hadiah",
+  investasi: "Investasi",
+  lainnya: "Lainnya",
+};
 export type SaldoTransactionType =
   | "task_claim"
   | "streak_bonus"
@@ -55,6 +102,9 @@ export type FamilyRow = {
   default_tugas_xp: number;
   streak_bonus_money: number;
   streak_bonus_point: number;
+  /** Saldo Utama tersimpan (0017). Sebelumnya dihitung ulang dari riwayat. */
+  main_balance: number;
+  main_balance_initialized: boolean;
   created_at: string;
 };
 
@@ -281,9 +331,15 @@ export type IncomeRow = {
   source: string;
   amount: number;
   date: string;
+  /** Akun tujuan. NULL = Saldo Utama. */
+  pocket_id: string | null;
+  category: string | null;
   note: string | null;
+  client_token: string | null;
   created_by: string | null;
+  updated_by: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type PocketTransferRow = {
@@ -296,6 +352,7 @@ export type PocketTransferRow = {
   amount: number;
   note: string | null;
   income_id: string | null;
+  client_token: string | null;
   created_by: string | null;
   created_at: string;
 };
@@ -321,8 +378,10 @@ export type ShoppingPlanRow = {
   status: ShoppingPlanStatus;
   total_estimated: number;
   total_actual: number;
+  note: string | null;
   created_by: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type ShoppingPlanItemRow = {
@@ -333,8 +392,14 @@ export type ShoppingPlanItemRow = {
   qty: number;
   estimated_price: number;
   actual_price: number | null;
+  /** Kolom lama; dipertahankan agar sinkron dengan `status`. */
   checked: boolean;
+  status: ShoppingPlanItemStatus;
+  note: string | null;
+  transaction_id: string | null;
+  position: number;
   created_at: string;
+  updated_at: string;
 };
 
 export type ShoppingTransactionRow = {
@@ -343,13 +408,45 @@ export type ShoppingTransactionRow = {
   plan_id: string | null;
   pocket_id: string | null;
   product_id: string | null;
+  merchant: string | null;
+  /** Legacy: sekarang mirror dari `merchant`. */
   name: string;
-  qty: number;
-  price: number;
+  qty: number | null;
+  price: number | null;
   total: number;
   date: string;
   source: ShoppingTransactionSource;
+  category: string | null;
+  note: string | null;
+  client_token: string | null;
   created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ShoppingTransactionItemRow = {
+  id: string;
+  transaction_id: string;
+  product_id: string | null;
+  name: string;
+  qty: number;
+  price: number;
+  subtotal: number;
+  position: number;
+  created_at: string;
+};
+
+export type ReceiptAttachmentRow = {
+  id: string;
+  family_id: string;
+  transaction_id: string | null;
+  storage_path: string;
+  file_size: number;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+  uploaded_by: string | null;
   created_at: string;
 };
 
@@ -370,6 +467,8 @@ export interface Database {
         | "default_tugas_xp"
         | "streak_bonus_money"
         | "streak_bonus_point"
+        | "main_balance"
+        | "main_balance_initialized"
         | "created_at"
       >;
       profiles: Helper<
@@ -475,10 +574,29 @@ export interface Database {
         "id" | "actor_id" | "entity_id" | "before_value" | "after_value" | "created_at"
       >;
       pockets: Helper<PocketRow, "id" | "type" | "balance" | "created_at">;
-      income: Helper<IncomeRow, "id" | "note" | "created_by" | "created_at">;
+      income: Helper<
+        IncomeRow,
+        | "id"
+        | "pocket_id"
+        | "category"
+        | "note"
+        | "client_token"
+        | "created_by"
+        | "updated_by"
+        | "created_at"
+        | "updated_at"
+      >;
       pocket_transfers: Helper<
         PocketTransferRow,
-        "id" | "from_pocket_id" | "to_type" | "to_pocket_id" | "note" | "income_id" | "created_by" | "created_at"
+        | "id"
+        | "from_pocket_id"
+        | "to_type"
+        | "to_pocket_id"
+        | "note"
+        | "income_id"
+        | "client_token"
+        | "created_by"
+        | "created_at"
       >;
       products: Helper<
         ProductRow,
@@ -486,19 +604,171 @@ export interface Database {
       >;
       shopping_plans: Helper<
         ShoppingPlanRow,
-        "id" | "planned_date" | "status" | "total_estimated" | "total_actual" | "created_by" | "created_at"
+        | "id"
+        | "planned_date"
+        | "status"
+        | "total_estimated"
+        | "total_actual"
+        | "note"
+        | "created_by"
+        | "created_at"
+        | "updated_at"
       >;
       shopping_plan_items: Helper<
         ShoppingPlanItemRow,
-        "id" | "product_id" | "qty" | "estimated_price" | "actual_price" | "checked" | "created_at"
+        | "id"
+        | "product_id"
+        | "qty"
+        | "estimated_price"
+        | "actual_price"
+        | "checked"
+        | "status"
+        | "note"
+        | "transaction_id"
+        | "position"
+        | "created_at"
+        | "updated_at"
       >;
       shopping_transactions: Helper<
         ShoppingTransactionRow,
-        "id" | "plan_id" | "pocket_id" | "product_id" | "qty" | "date" | "source" | "created_by" | "created_at"
+        | "id"
+        | "plan_id"
+        | "pocket_id"
+        | "product_id"
+        | "merchant"
+        | "qty"
+        | "price"
+        | "date"
+        | "source"
+        | "category"
+        | "note"
+        | "client_token"
+        | "created_by"
+        | "updated_by"
+        | "created_at"
+        | "updated_at"
+      >;
+      shopping_transaction_items: Helper<
+        ShoppingTransactionItemRow,
+        "id" | "product_id" | "qty" | "price" | "subtotal" | "position" | "created_at"
+      >;
+      receipt_attachments: Helper<
+        ReceiptAttachmentRow,
+        | "id"
+        | "transaction_id"
+        | "file_size"
+        | "mime_type"
+        | "width"
+        | "height"
+        | "uploaded_by"
+        | "created_at"
       >;
       room_themes: Helper<RoomThemeRow, "id" | "created_at">;
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    // RPC keuangan (0017–0019). Argumen dilewatkan sebagai objek bernama.
+    Functions: {
+      fin_create_income: {
+        Args: {
+          p_family_id: string;
+          p_source: string;
+          p_amount: number;
+          p_date: string;
+          p_pocket_id: string | null;
+          p_category: string;
+          p_note: string | null;
+          p_created_by: string;
+          p_client_token?: string | null;
+        };
+        Returns: string;
+      };
+      fin_update_income: {
+        Args: {
+          p_income_id: string;
+          p_family_id: string;
+          p_source: string;
+          p_amount: number;
+          p_date: string;
+          p_pocket_id: string | null;
+          p_category: string;
+          p_note: string | null;
+          p_updated_by: string;
+        };
+        Returns: undefined;
+      };
+      fin_delete_income: {
+        Args: { p_income_id: string; p_family_id: string };
+        Returns: undefined;
+      };
+      fin_create_transfer: {
+        Args: {
+          p_family_id: string;
+          p_from_type: string;
+          p_from_pocket: string | null;
+          p_to_type: string;
+          p_to_pocket: string | null;
+          p_amount: number;
+          p_note: string | null;
+          p_created_by: string;
+          p_client_token?: string | null;
+        };
+        Returns: string;
+      };
+      fin_delete_transfer: {
+        Args: { p_transfer_id: string; p_family_id: string };
+        Returns: undefined;
+      };
+      fin_reverse_transfer: {
+        Args: { p_transfer_id: string; p_family_id: string; p_created_by: string };
+        Returns: string;
+      };
+      fin_create_shopping: {
+        Args: {
+          p_family_id: string;
+          p_merchant: string;
+          p_date: string;
+          p_pocket_id: string | null;
+          p_category: string;
+          p_note: string | null;
+          p_source: string;
+          p_plan_id: string | null;
+          p_items: { name: string; qty: number; price: number }[];
+          p_created_by: string;
+          p_client_token?: string | null;
+        };
+        Returns: string;
+      };
+      fin_update_shopping: {
+        Args: {
+          p_transaction_id: string;
+          p_family_id: string;
+          p_merchant: string;
+          p_date: string;
+          p_pocket_id: string | null;
+          p_category: string;
+          p_note: string | null;
+          p_items: { name: string; qty: number; price: number }[];
+          p_updated_by: string;
+        };
+        Returns: undefined;
+      };
+      fin_delete_shopping: {
+        Args: { p_transaction_id: string; p_family_id: string };
+        Returns: undefined;
+      };
+      fin_storage_usage: {
+        Args: { p_family_id: string };
+        Returns: {
+          total_bytes: number;
+          file_count: number;
+          orphan_count: number;
+          orphan_bytes: number;
+        }[];
+      };
+      fin_storage_usage_by_month: {
+        Args: { p_family_id: string };
+        Returns: { month: string; bytes: number; file_count: number }[];
+      };
+    };
   };
 }

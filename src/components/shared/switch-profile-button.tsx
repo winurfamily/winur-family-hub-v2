@@ -6,6 +6,7 @@ import { LogOut } from "lucide-react";
 import { logoutSession } from "@/app/actions/auth";
 import { useSessionStore } from "@/store/session-store";
 import { soundManager } from "@/lib/sound/sound-manager";
+import { audioManager } from "@/lib/audio/audio-manager";
 import { cn } from "@/lib/utils";
 
 interface SwitchProfileButtonProps {
@@ -21,9 +22,15 @@ export function SwitchProfileButton({ className, iconOnly = false }: SwitchProfi
   const handleSwitch = () => {
     soundManager.play("switch");
     startTransition(async () => {
+      // Urutan penting: cookie sesi dihapus di server LEBIH DULU, baru state
+      // klien dibersihkan, baru navigasi. Kalau dibalik, halaman berikutnya
+      // masih bisa terbaca sebagai sesi lama sesaat.
       await logoutSession();
       clearProfile();
-      router.push("/");
+      audioManager.stopBGM();
+      // replace (bukan push) supaya tombol "kembali" browser tidak
+      // memunculkan lagi halaman admin dari profil sebelumnya.
+      router.replace("/");
       router.refresh();
     });
   };

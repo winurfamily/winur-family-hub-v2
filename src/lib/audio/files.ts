@@ -1,7 +1,6 @@
 import type { BgmTrack, SfxName, VoiceCharacter, VoiceLine } from "./types";
 
 export const BGM_FILES: Record<BgmTrack, string> = {
-  login: "/sounds/bgm/login.mp3",
   daffa_room: "/sounds/bgm/room.mp3",
   dio_room: "/sounds/bgm/room.mp3",
   admin_home: "/sounds/bgm/admin_home.mp3",

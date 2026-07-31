@@ -1,265 +1,196 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Camera, Trash2, Plus } from "lucide-react";
+import { Camera, ImagePlus, Loader2, RotateCcw, ScanLine } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import {
-  scanReceipt,
-  addShoppingTransaction,
-  addShoppingTransactionsBatch,
-  type PocketSummary,
-  type ScannedItem,
-  type ScanReceiptResult,
-} from "@/app/actions/keuangan";
-import { formatRupiah, todayISODate } from "@/lib/format";
-import { MAIN_POCKET_VALUE } from "@/lib/validation/keuangan";
+import { ShoppingForm } from "./shopping-form";
+import type { AttachedReceipt } from "./receipt-uploader";
+import { scanReceipt, type ScannedItem } from "@/app/actions/scan";
+import { uploadReceipt } from "@/app/actions/receipts";
+import { compressImage, formatBytes, ACCEPTED_MIME } from "@/lib/image-compress";
+import { todayISODate } from "@/lib/format";
+import type { PocketSummary } from "@/app/actions/keuangan";
 
-type ScanMode = "quick" | "full";
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+interface ScanDraft {
+  merchant: string;
+  date: string;
+  items: ScannedItem[];
+  receipt: AttachedReceipt | null;
+  /** Diisi bila AI gagal membaca, agar pengguna tetap bisa lanjut manual. */
+  warning?: string;
 }
 
-export function BelanjaScan({ pockets }: { pockets: PocketSummary[] }) {
-  const [mode, setMode] = useState<ScanMode>("quick");
-  const [preview, setPreview] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [result, setResult] = useState<ScanReceiptResult | null>(null);
-  const [items, setItems] = useState<ScannedItem[]>([]);
-  const [quickTotal, setQuickTotal] = useState(0);
-  const [storeName, setStoreName] = useState("");
-  const [date, setDate] = useState(todayISODate());
-  const [pocketId, setPocketId] = useState(MAIN_POCKET_VALUE);
-  const [isScanning, startScan] = useTransition();
-  const [isSaving, startSave] = useTransition();
+/**
+ * Scan AI → layar review → simpan.
+ *
+ * Hasil pembacaan AI TIDAK PERNAH langsung disimpan (F5.4/F5.9). Yang
+ * dikembalikan model hanya mengisi nilai awal form; transaksi baru tercipta
+ * setelah pengguna menekan tombol simpan pada form review. Kalau pembacaan
+ * gagal, form tetap dibuka dalam keadaan kosong supaya pengguna bisa
+ * meneruskan secara manual tanpa mengulang dari awal.
+ */
+export function BelanjaScan({ pockets, saldoUtama }: { pockets: PocketSummary[]; saldoUtama: number }) {
+  const [draft, setDraft] = useState<ScanDraft | null>(null);
+  const [phase, setPhase] = useState<"idle" | "compress" | "upload" | "reading">("idle");
+  const [isPending, startTransition] = useTransition();
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
 
-  const reset = () => {
-    setPreview(null);
-    setImageBase64(null);
-    setResult(null);
-    setItems([]);
-    setQuickTotal(0);
-    setStoreName("");
-  };
+  const busy = phase !== "idle" || isPending;
 
-  const handleFile = async (file: File) => {
-    const dataUrl = await fileToDataUrl(file);
-    setImageBase64(dataUrl);
-    setPreview(dataUrl);
-    setResult(null);
-    setItems([]);
-  };
+  const handleFile = (file: File | undefined) => {
+    if (!file) return;
 
-  const handleScan = () => {
-    if (!imageBase64) return;
-    startScan(async () => {
-      const res = await scanReceipt(imageBase64, mode);
-      if (!res.success) {
-        toast.error(res.error ?? "Gagal membaca struk.");
-        return;
+    startTransition(async () => {
+      let receipt: AttachedReceipt | null = null;
+
+      try {
+        setPhase("compress");
+        const compressed = await compressImage(file);
+
+        // Struk disimpan lebih dulu supaya tetap tersimpan walau pembacaan AI
+        // gagal — foto yang sudah diambil tidak hilang percuma.
+        setPhase("upload");
+        const uploaded = await uploadReceipt({
+          dataUrl: compressed.dataUrl,
+          width: compressed.width,
+          height: compressed.height,
+        });
+
+        if (uploaded.success && uploaded.data) {
+          receipt = {
+            id: uploaded.data.id,
+            previewUrl: compressed.dataUrl,
+            bytes: uploaded.data.fileSize,
+          };
+          toast.success(`Struk tersimpan (${formatBytes(uploaded.data.fileSize)}).`);
+        } else {
+          toast.error(uploaded.error ?? "Struk gagal diunggah, tetapi scan tetap dilanjutkan.");
+        }
+
+        setPhase("reading");
+        const result = await scanReceipt(compressed.dataUrl);
+
+        if (!result.success) {
+          setDraft({
+            merchant: "",
+            date: todayISODate(),
+            items: [],
+            receipt,
+            warning: result.error ?? "Struk tidak terbaca. Silakan isi manual di bawah ini.",
+          });
+          return;
+        }
+
+        setDraft({
+          merchant: result.storeName ?? "",
+          date: result.date ?? todayISODate(),
+          items: result.items ?? [],
+          receipt,
+        });
+        toast.success("Struk terbaca. Periksa dan perbaiki bila ada yang salah.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Gagal memproses gambar.");
+      } finally {
+        setPhase("idle");
+        if (cameraRef.current) cameraRef.current.value = "";
+        if (galleryRef.current) galleryRef.current.value = "";
       }
-      setResult(res);
-      setStoreName(res.storeName ?? "Belanja");
-      if (res.date) setDate(res.date);
-      if (mode === "quick") setQuickTotal(res.total ?? 0);
-      if (mode === "full") setItems(res.items ?? []);
     });
   };
 
-  const updateItem = (index: number, patch: Partial<ScannedItem>) => {
-    setItems((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
-  };
-
-  const removeItem = (index: number) => {
-    setItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const addItemRow = () => {
-    setItems((prev) => [...prev, { name: "", qty: 1, price: 0 }]);
-  };
-
-  const fullTotal = items.reduce((acc, item) => acc + Number(item.qty || 0) * Number(item.price || 0), 0);
-
-  const handleSave = () => {
-    const finalPocketId = pocketId === MAIN_POCKET_VALUE ? null : pocketId;
-
-    startSave(async () => {
-      const res =
-        mode === "quick"
-          ? await addShoppingTransaction({
-              name: storeName.trim() || "Belanja",
-              qty: 1,
-              price: quickTotal,
-              date,
-              pocketId: finalPocketId,
-              source: "scan",
-            })
-          : await addShoppingTransactionsBatch({ pocketId: finalPocketId, date, source: "scan", items });
-
-      if (!res.success) {
-        toast.error(res.error ?? "Gagal menyimpan belanja.");
-        return;
-      }
-
-      toast.success("Belanja dari scan berhasil disimpan.");
-      reset();
-    });
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border-2 border-border bg-card shadow-card p-4 space-y-3">
-        <h2 className="font-heading font-extrabold text-ink-1 flex items-center gap-2">
-          <Camera className="w-5 h-5 text-accent" /> Scan Struk (AI)
-        </h2>
-
-        <div className="flex gap-2">
+  if (draft) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3 rounded-[18px] bg-card p-4 shadow-card">
+          <div className="min-w-0">
+            <p className="font-heading text-sm font-black text-ink-1">Periksa hasil pembacaan</p>
+            <p className="mt-0.5 text-xs font-semibold text-ink-2">
+              {draft.warning ??
+                "Semua kolom bisa diperbaiki. Transaksi baru tersimpan setelah kamu menekan tombol simpan."}
+            </p>
+          </div>
           <GameButton
             type="button"
-            variant={mode === "quick" ? "primary" : "outline"}
+            variant="outline"
             size="sm"
-            playSound={false}
-            onClick={() => {
-              setMode("quick");
-              setResult(null);
-            }}
+            className="shrink-0 gap-1"
+            onClick={() => setDraft(null)}
           >
-            Quick Scan
-          </GameButton>
-          <GameButton
-            type="button"
-            variant={mode === "full" ? "primary" : "outline"}
-            size="sm"
-            playSound={false}
-            onClick={() => {
-              setMode("full");
-              setResult(null);
-            }}
-          >
-            Full Scan
+            <RotateCcw className="h-4 w-4" aria-hidden /> Ulangi
           </GameButton>
         </div>
-        <p className="text-xs text-ink-2">
-          {mode === "quick"
-            ? "Quick scan membaca total belanja dari struk (1 baris transaksi)."
-            : "Full scan membaca daftar item & harga satuan dari struk."}
-        </p>
 
-        <Input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleFile(file);
+        <ShoppingForm
+          key={draft.receipt?.id ?? "scan-draft"}
+          pockets={pockets}
+          saldoUtama={saldoUtama}
+          origin="scan"
+          initialReceipt={draft.receipt}
+          submitLabel="Simpan Hasil Scan"
+          defaults={{
+            merchant: draft.merchant,
+            date: draft.date,
+            items: draft.items.length > 0 ? draft.items : undefined,
           }}
         />
-
-        {preview && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="Preview struk" className="rounded-xl border-2 border-border max-h-64 object-contain mx-auto" />
-        )}
-
-        {preview && !result && (
-          <GameButton type="button" variant="accent" block onClick={handleScan} disabled={isScanning}>
-            {isScanning ? "Membaca struk..." : "Baca Struk dengan AI"}
-          </GameButton>
-        )}
       </div>
+    );
+  }
 
-      {result && (
-        <div className="rounded-2xl border-2 border-border bg-card shadow-card p-4 space-y-3">
-          <h3 className="font-heading font-extrabold text-ink-1">Hasil Scan</h3>
+  return (
+    <div className="rounded-[20px] bg-card p-5 text-center shadow-card">
+      <input
+        ref={cameraRef}
+        type="file"
+        accept={ACCEPTED_MIME.join(",")}
+        capture="environment"
+        className="sr-only"
+        onChange={(e) => handleFile(e.target.files?.[0])}
+      />
+      <input
+        ref={galleryRef}
+        type="file"
+        accept={ACCEPTED_MIME.join(",")}
+        className="sr-only"
+        onChange={(e) => handleFile(e.target.files?.[0])}
+      />
 
-          <div className="space-y-1">
-            <Label>Nama Toko</Label>
-            <Input value={storeName} onChange={(e) => setStoreName(e.target.value)} />
-          </div>
-
-          {mode === "quick" ? (
-            <div className="space-y-1">
-              <Label>Total Belanja (Rp)</Label>
-              <Input
-                type="number"
-                min={0}
-                step={500}
-                value={quickTotal}
-                onChange={(e) => setQuickTotal(Number(e.target.value) || 0)}
-              />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>Item Belanja</Label>
-              {items.map((item, index) => (
-                <div key={index} className="grid grid-cols-[1fr_56px_88px_32px] gap-2 items-center">
-                  <Input
-                    value={item.name}
-                    placeholder="Nama item"
-                    onChange={(e) => updateItem(index, { name: e.target.value })}
-                  />
-                  <Input
-                    type="number"
-                    min={1}
-                    value={item.qty}
-                    onChange={(e) => updateItem(index, { qty: Number(e.target.value) || 1 })}
-                  />
-                  <Input
-                    type="number"
-                    min={0}
-                    step={500}
-                    value={item.price}
-                    onChange={(e) => updateItem(index, { price: Number(e.target.value) || 0 })}
-                  />
-                  <button type="button" onClick={() => removeItem(index)} aria-label="Hapus item">
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </button>
-                </div>
-              ))}
-              <GameButton type="button" variant="outline" size="sm" block onClick={addItemRow}>
-                <Plus className="w-4 h-4" /> Tambah Item
-              </GameButton>
-              <p className="text-sm text-ink-2 text-right">
-                Total: <span className="font-heading font-extrabold text-ink-1">{formatRupiah(fullTotal)}</span>
-              </p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>Sumber Dana</Label>
-              <Select value={pocketId} onValueChange={setPocketId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={MAIN_POCKET_VALUE}>Saldo Utama</SelectItem>
-                  {pockets.map((pocket) => (
-                    <SelectItem key={pocket.id} value={pocket.id}>
-                      {pocket.name} ({formatRupiah(pocket.balance)})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Tanggal</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-          </div>
-
-          <GameButton type="button" variant="secondary" block onClick={handleSave} disabled={isSaving}>
-            {isSaving ? "Menyimpan..." : "Simpan Belanja"}
-          </GameButton>
+      {busy ? (
+        <div className="flex min-h-[180px] flex-col items-center justify-center gap-2 text-ink-2">
+          <Loader2 className="h-7 w-7 animate-spin text-primary" aria-hidden />
+          <p className="text-sm font-bold">
+            {phase === "compress"
+              ? "Mengompres gambar…"
+              : phase === "upload"
+                ? "Menyimpan struk…"
+                : "AI sedang membaca struk…"}
+          </p>
         </div>
+      ) : (
+        <>
+          <span
+            aria-hidden
+            className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 text-accent"
+          >
+            <ScanLine className="h-7 w-7" />
+          </span>
+          <h2 className="mt-3 font-heading text-base font-black text-ink-1">Scan Struk dengan AI</h2>
+          <p className="mx-auto mt-1 max-w-sm text-xs font-semibold text-ink-3">
+            Potret struk belanja, biarkan AI membaca nama toko, tanggal, dan daftar barangnya. Kamu
+            tetap bisa memperbaiki semua hasilnya sebelum disimpan.
+          </p>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <GameButton type="button" variant="primary" block onClick={() => cameraRef.current?.click()}>
+              <Camera className="h-4 w-4" aria-hidden /> Ambil Foto
+            </GameButton>
+            <GameButton type="button" variant="outline" block onClick={() => galleryRef.current?.click()}>
+              <ImagePlus className="h-4 w-4" aria-hidden /> Dari Galeri
+            </GameButton>
+          </div>
+        </>
       )}
     </div>
   );

@@ -1,21 +1,16 @@
-import { getFinanceSummary, getShoppingPlans, getShoppingHistory } from "@/app/actions/keuangan";
-import { currentMonth } from "@/lib/finance";
-import { BelanjaTabs } from "../_components/belanja-tabs";
+import { getFinanceSummary } from "@/app/actions/keuangan";
+import { BelanjaSaldoSummary } from "../_components/belanja-saldo-summary";
+import { ShoppingForm } from "../_components/shopping-form";
 
-export default async function BelanjaPage() {
-  const month = currentMonth();
-  const [summary, plans, history] = await Promise.all([
-    getFinanceSummary(),
-    getShoppingPlans(),
-    getShoppingHistory(month),
-  ]);
+export const dynamic = "force-dynamic";
+
+export default async function BelanjaManualPage() {
+  const summary = await getFinanceSummary();
 
   return (
-    <BelanjaTabs
-      pockets={summary?.pockets ?? []}
-      plans={plans}
-      historyMonth={month}
-      historyData={history}
-    />
+    <div className="space-y-4">
+      <BelanjaSaldoSummary pockets={summary?.pockets ?? []} saldoUtama={summary?.saldoUtama ?? 0} />
+      <ShoppingForm pockets={summary?.pockets ?? []} saldoUtama={summary?.saldoUtama ?? 0} />
+    </div>
   );
 }

@@ -8,6 +8,11 @@ const withPWA = withPWAInit({
   reloadOnOnline: true,
   workboxOptions: {
     disableDevLogs: true,
+    // Berkas audio TIDAK ikut di-precache service worker (B.1). Halaman awal
+    // tidak memutar musik sama sekali, jadi mengunduhnya di muka hanya
+    // membuang kuota — dan menyisakan berkas BGM lama di cache perangkat
+    // yang sudah pernah membuka versi sebelumnya.
+    exclude: [/\.mp3$/i, /\.ogg$/i, /\.wav$/i, /\.m4a$/i],
   },
 });
 

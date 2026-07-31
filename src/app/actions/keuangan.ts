@@ -2,52 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getCurrentSession } from "@/app/actions/auth";
-import { normalizeProductName, currentMonth, monthRange, sumBy } from "@/lib/finance";
+import { logAudit } from "@/lib/server/admin-helpers";
+import {
+  requireFinanceSession,
+  revalidateKeuangan,
+  rpcError,
+  toRupiah,
+  safeToken,
+  isUuid,
+  FORBIDDEN,
+  type AdminClient,
+  type ActionResult,
+} from "@/lib/server/finance-helpers";
 import { syncChildSaldoFromPocket } from "@/lib/server/child-savings";
-import { formatRupiah } from "@/lib/format";
-import type { PocketType, ShoppingTransactionSource } from "@/lib/supabase/types";
+import { normalizeProductName, currentMonth, monthRange } from "@/lib/finance";
+import type { PocketType } from "@/lib/supabase/types";
 
-type AdminClient = ReturnType<typeof createAdminClient>;
-
-export interface ActionResult {
-  success: boolean;
-  error?: string;
-}
-
-async function requireAdmin() {
-  const session = await getCurrentSession();
-  if (!session || session.role !== "admin") return null;
-  return session;
-}
-
-async function logAudit(
-  supabase: AdminClient,
-  familyId: string,
-  actorId: string,
-  entityType: string,
-  entityId: string | null,
-  action: string,
-  beforeValue: Record<string, unknown> | null,
-  afterValue: Record<string, unknown> | null
-) {
-  await supabase.from("audit_logs").insert({
-    family_id: familyId,
-    actor_id: actorId,
-    entity_type: entityType,
-    entity_id: entityId,
-    action,
-    before_value: beforeValue,
-    after_value: afterValue,
-  });
-}
-
-function revalidateKeuangan() {
-  revalidatePath("/admin/keuangan");
-  revalidatePath("/admin/keuangan/pockets");
-  revalidatePath("/admin/keuangan/transfer");
-  revalidatePath("/admin/keuangan/belanja");
-}
+export type { ActionResult };
 
 /** Jika pocket bernama "Tabungan {Nama Anak}", revalidate halaman beranda anak terkait. */
 async function revalidateChildSavingsPocket(supabase: AdminClient, familyId: string, pocketName: string) {
@@ -66,7 +37,7 @@ async function revalidateChildSavingsPocket(supabase: AdminClient, familyId: str
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard
+// Ringkasan saldo
 // ---------------------------------------------------------------------------
 
 export interface PocketSummary {
@@ -79,35 +50,44 @@ export interface PocketSummary {
 
 export interface FinanceSummary {
   saldoUtama: number;
+  totalPockets: number;
+  totalKeluarga: number;
   totalIncome: number;
   totalExpenseThisMonth: number;
   pockets: PocketSummary[];
 }
 
+/**
+ * Saldo Utama dibaca dari families.main_balance (kolom tersimpan sejak
+ * migration 0017), bukan dihitung ulang dari riwayat seperti sebelumnya.
+ * Inilah yang membuat penghapusan riwayat transfer tidak lagi mengubah saldo.
+ */
 export async function getFinanceSummary(): Promise<FinanceSummary | null> {
-  const session = await getCurrentSession();
+  const session = await requireFinanceSession();
   if (!session) return null;
 
   const supabase = createAdminClient();
   const { start, end } = monthRange(currentMonth());
 
-  const [pocketsRes, incomeRes, mainTransfersOutRes, mainTransfersInRes, directExpenseRes, monthExpenseRes, pocketExpenseRes] = await Promise.all([
+  const [familyRes, pocketsRes, incomeRes, monthExpenseRes, pocketExpenseRes] = await Promise.all([
+    supabase.from("families").select("main_balance").eq("id", session.familyId).maybeSingle(),
     supabase
       .from("pockets")
       .select("id, name, type, balance")
       .eq("family_id", session.familyId)
       .order("created_at", { ascending: true }),
     supabase.from("income").select("amount").eq("family_id", session.familyId),
-    supabase.from("pocket_transfers").select("amount").eq("family_id", session.familyId).eq("from_type", "main"),
-    supabase.from("pocket_transfers").select("amount").eq("family_id", session.familyId).eq("to_type", "main"),
-    supabase.from("shopping_transactions").select("total").eq("family_id", session.familyId).is("pocket_id", null),
     supabase
       .from("shopping_transactions")
       .select("total")
       .eq("family_id", session.familyId)
       .gte("date", start)
       .lte("date", end),
-    supabase.from("shopping_transactions").select("pocket_id, total").eq("family_id", session.familyId).not("pocket_id", "is", null),
+    supabase
+      .from("shopping_transactions")
+      .select("pocket_id, total")
+      .eq("family_id", session.familyId)
+      .not("pocket_id", "is", null),
   ]);
 
   const spentByPocket = new Map<string, number>();
@@ -124,158 +104,17 @@ export async function getFinanceSummary(): Promise<FinanceSummary | null> {
     totalSpent: spentByPocket.get(p.id) ?? 0,
   }));
 
-  const totalIncome = sumBy(incomeRes.data, "amount");
-  const totalDistributed = sumBy(mainTransfersOutRes.data, "amount");
-  const totalReturnedToMain = sumBy(mainTransfersInRes.data, "amount");
-  const totalDirectExpense = sumBy(directExpenseRes.data, "total");
+  const saldoUtama = Number(familyRes.data?.main_balance ?? 0);
+  const totalPockets = pockets.reduce((acc, p) => acc + p.balance, 0);
 
   return {
-    saldoUtama: totalIncome - totalDistributed + totalReturnedToMain - totalDirectExpense,
-    totalIncome,
-    totalExpenseThisMonth: sumBy(monthExpenseRes.data, "total"),
+    saldoUtama,
+    totalPockets,
+    totalKeluarga: saldoUtama + totalPockets,
+    totalIncome: (incomeRes.data ?? []).reduce((acc, r) => acc + Number(r.amount), 0),
+    totalExpenseThisMonth: (monthExpenseRes.data ?? []).reduce((acc, r) => acc + Number(r.total), 0),
     pockets,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Pendapatan (income) + auto-split ke pocket
-// ---------------------------------------------------------------------------
-
-export interface IncomeHistoryItem {
-  id: string;
-  source: string;
-  amount: number;
-  date: string;
-  note: string | null;
-  createdAt: string;
-}
-
-export async function getIncomeHistory(limit = 10): Promise<IncomeHistoryItem[]> {
-  const session = await getCurrentSession();
-  if (!session) return [];
-
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("income")
-    .select("id, source, amount, date, note, created_at")
-    .eq("family_id", session.familyId)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    source: row.source,
-    amount: Number(row.amount),
-    date: row.date,
-    note: row.note,
-    createdAt: row.created_at,
-  }));
-}
-
-export interface AddIncomeInput {
-  source: string;
-  amount: number;
-  date: string;
-  note?: string;
-}
-
-export async function addIncome(input: AddIncomeInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const source = input.source.trim();
-  if (!source) return { success: false, error: "Sumber pendapatan wajib diisi." };
-  if (!Number.isFinite(input.amount) || input.amount <= 0) {
-    return { success: false, error: "Nominal harus lebih dari 0." };
-  }
-
-  const supabase = createAdminClient();
-
-  const { data: income, error } = await supabase
-    .from("income")
-    .insert({
-      family_id: session.familyId,
-      source,
-      amount: input.amount,
-      date: input.date,
-      note: input.note?.trim() || null,
-      created_by: session.profileId,
-    })
-    .select("id")
-    .single();
-
-  if (error || !income) return { success: false, error: "Gagal menyimpan pendapatan." };
-
-  await logAudit(supabase, session.familyId, session.profileId, "income", income.id, "create", null, {
-    source,
-    amount: input.amount,
-    date: input.date,
-  });
-
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export async function deleteIncome(id: string): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const supabase = createAdminClient();
-  const { data: income } = await supabase
-    .from("income")
-    .select("id, source, amount, date")
-    .eq("id", id)
-    .eq("family_id", session.familyId)
-    .maybeSingle();
-
-  if (!income) return { success: false, error: "Pendapatan tidak ditemukan." };
-
-  // Batalkan auto-split yang dibuat saat pendapatan ini dicatat
-  const { data: splits } = await supabase
-    .from("pocket_transfers")
-    .select("id, to_pocket_id, amount")
-    .eq("family_id", session.familyId)
-    .eq("income_id", id);
-
-  for (const split of splits ?? []) {
-    if (!split.to_pocket_id) continue;
-
-    const { data: pocket } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", split.to_pocket_id)
-      .maybeSingle();
-
-    if (!pocket) continue;
-
-    const balanceBefore = Number(pocket.balance);
-    const balanceAfter = Math.max(0, balanceBefore - Number(split.amount));
-    await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
-
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "auto_split_revert", {
-      balance: balanceBefore,
-    }, { balance: balanceAfter });
-
-    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, balanceAfter - balanceBefore);
-    await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
-  }
-
-  if (splits && splits.length > 0) {
-    await supabase.from("pocket_transfers").delete().eq("income_id", id);
-  }
-
-  const { error } = await supabase.from("income").delete().eq("id", id).eq("family_id", session.familyId);
-  if (error) return { success: false, error: "Gagal menghapus pendapatan." };
-
-  await logAudit(supabase, session.familyId, session.profileId, "income", id, "delete", {
-    source: income.source,
-    amount: Number(income.amount),
-    date: income.date,
-  }, null);
-
-  revalidateKeuangan();
-  return { success: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -287,28 +126,22 @@ export interface CreatePocketInput {
 }
 
 export async function createPocket(input: CreatePocketInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
 
   const name = input.name.trim();
   if (!name) return { success: false, error: "Nama pocket wajib diisi." };
 
   const supabase = createAdminClient();
-
   const { data: pocket, error } = await supabase
     .from("pockets")
-    .insert({
-      family_id: session.familyId,
-      name,
-      type: "custom",
-    })
+    .insert({ family_id: session.familyId, name, type: "custom" })
     .select("id")
     .single();
 
   if (error || !pocket) return { success: false, error: "Gagal membuat pocket." };
 
   await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "create", null, { name });
-
   revalidateKeuangan();
   return { success: true };
 }
@@ -319,11 +152,12 @@ export interface UpdatePocketInput {
 }
 
 export async function updatePocket(input: UpdatePocketInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
 
   const name = input.name.trim();
   if (!name) return { success: false, error: "Nama pocket wajib diisi." };
+  if (!isUuid(input.id)) return { success: false, error: "Pocket tidak ditemukan." };
 
   const supabase = createAdminClient();
   const { data: before } = await supabase
@@ -343,15 +177,24 @@ export async function updatePocket(input: UpdatePocketInput): Promise<ActionResu
 
   if (error) return { success: false, error: "Gagal memperbarui pocket." };
 
-  await logAudit(supabase, session.familyId, session.profileId, "pocket", input.id, "update", { name: before.name }, { name });
-
+  await logAudit(
+    supabase,
+    session.familyId,
+    session.profileId,
+    "pocket",
+    input.id,
+    "update",
+    { name: before.name },
+    { name }
+  );
   revalidateKeuangan();
   return { success: true };
 }
 
 export async function deletePocket(id: string): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+  if (!isUuid(id)) return { success: false, error: "Pocket tidak ditemukan." };
 
   const supabase = createAdminClient();
   const { data: pocket } = await supabase
@@ -366,19 +209,20 @@ export async function deletePocket(id: string): Promise<ActionResult> {
     return { success: false, error: "Pindahkan saldo pocket ini ke pocket lain sebelum menghapus." };
   }
 
-  const { error } = await supabase.from("pockets").delete().eq("id", id);
-  if (error) return { success: false, error: "Gagal menghapus pocket." };
+  // family_id ikut difilter di DELETE, bukan hanya di SELECT pengecekan.
+  const { error } = await supabase.from("pockets").delete().eq("id", id).eq("family_id", session.familyId);
+  if (error) return { success: false, error: "Gagal menghapus pocket. Pastikan tidak ada transaksi terkait." };
 
   await logAudit(supabase, session.familyId, session.profileId, "pocket", id, "delete", { name: pocket.name }, null);
-
   revalidateKeuangan();
   return { success: true };
 }
 
 /** Tarik seluruh saldo pocket dan kembalikan ke Saldo Utama. */
 export async function withdrawPocketBalance(id: string): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+  if (!isUuid(id)) return { success: false, error: "Pocket tidak ditemukan." };
 
   const supabase = createAdminClient();
   const { data: pocket } = await supabase
@@ -393,24 +237,30 @@ export async function withdrawPocketBalance(id: string): Promise<ActionResult> {
   const amount = Number(pocket.balance);
   if (amount <= 0) return { success: false, error: "Saldo pocket sudah kosong." };
 
-  const { error } = await supabase.from("pocket_transfers").insert({
-    family_id: session.familyId,
-    from_type: "pocket",
-    from_pocket_id: pocket.id,
-    to_type: "main",
-    amount,
-    note: `Tarik saldo pocket "${pocket.name}" ke Saldo Utama`,
-    created_by: session.profileId,
+  const { error } = await supabase.rpc("fin_create_transfer", {
+    p_family_id: session.familyId,
+    p_from_type: "pocket",
+    p_from_pocket: pocket.id,
+    p_to_type: "main",
+    p_to_pocket: null,
+    p_amount: amount,
+    p_note: `Tarik saldo pocket "${pocket.name}" ke Saldo Utama`,
+    p_created_by: session.profileId,
+    p_client_token: null,
   });
 
-  if (error) return { success: false, error: "Gagal menarik saldo pocket." };
+  if (error) return { success: false, error: rpcError(error, "Gagal menarik saldo pocket.") };
 
-  await supabase.from("pockets").update({ balance: 0 }).eq("id", pocket.id);
-
-  await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "withdraw_to_main", {
-    balance: amount,
-  }, { balance: 0 });
-
+  await logAudit(
+    supabase,
+    session.familyId,
+    session.profileId,
+    "pocket",
+    pocket.id,
+    "withdraw_to_main",
+    { balance: amount },
+    { balance: 0 }
+  );
   await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -amount);
 
   revalidateKeuangan();
@@ -425,107 +275,91 @@ export async function withdrawPocketBalance(id: string): Promise<ActionResult> {
 export interface TransferPocketInput {
   fromType: "main" | "pocket";
   fromPocketId?: string;
-  toType: "pocket" | "external";
+  toType: "main" | "pocket" | "external";
   toPocketId?: string;
   amount: number;
   note?: string;
+  clientToken?: string;
 }
 
 export async function transferPocket(input: TransferPocketInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
 
-  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+  const amount = toRupiah(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
     return { success: false, error: "Nominal harus lebih dari 0." };
   }
   if (input.toType === "external" && !input.note?.trim()) {
     return { success: false, error: "Isi untuk apa transfer ini." };
   }
-  if (input.toType === "pocket" && !input.toPocketId) {
-    return { success: false, error: "Pilih pocket tujuan." };
+
+  const fromPocketId = input.fromType === "pocket" ? input.fromPocketId : undefined;
+  const toPocketId = input.toType === "pocket" ? input.toPocketId : undefined;
+
+  if (input.fromType === "pocket" && !isUuid(fromPocketId)) {
+    return { success: false, error: "Pilih pocket asal." };
   }
-  if (
-    input.toType === "pocket" &&
-    input.fromType === "pocket" &&
-    (!input.fromPocketId || input.fromPocketId === input.toPocketId)
-  ) {
-    return { success: false, error: "Pocket asal dan tujuan tidak boleh sama." };
+  if (input.toType === "pocket" && !isUuid(toPocketId)) {
+    return { success: false, error: "Pilih pocket tujuan." };
   }
 
   const supabase = createAdminClient();
 
-  let fromPocket: { id: string; name: string; balance: number } | null = null;
-  if (input.fromType === "pocket") {
-    const { data } = await supabase
+  // Validasi kepemilikan pocket sebelum menyentuh saldo.
+  const pocketIds = [fromPocketId, toPocketId].filter(isUuid);
+  const nameById = new Map<string, string>();
+  if (pocketIds.length > 0) {
+    const { data: owned } = await supabase
       .from("pockets")
-      .select("id, name, balance")
-      .eq("id", input.fromPocketId!)
+      .select("id, name")
       .eq("family_id", session.familyId)
-      .maybeSingle();
+      .in("id", pocketIds);
 
-    if (!data) return { success: false, error: "Pocket asal tidak ditemukan." };
-    if (Number(data.balance) < input.amount) {
-      return { success: false, error: `Saldo pocket asal tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
-    }
-    fromPocket = { id: data.id, name: data.name, balance: Number(data.balance) };
-  } else {
-    const summary = await getFinanceSummary();
-    if (!summary || summary.saldoUtama < input.amount) {
-      return { success: false, error: "Saldo utama tidak cukup." };
+    for (const p of owned ?? []) nameById.set(p.id, p.name);
+    if (nameById.size !== new Set(pocketIds).size) {
+      return { success: false, error: "Pocket tidak ditemukan." };
     }
   }
 
-  let toPocket: { id: string; name: string; balance: number } | null = null;
-  if (input.toType === "pocket") {
-    const { data: toPocketData } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", input.toPocketId!)
-      .eq("family_id", session.familyId)
-      .maybeSingle();
+  const { data: transferId, error } = await supabase.rpc("fin_create_transfer", {
+    p_family_id: session.familyId,
+    p_from_type: input.fromType,
+    p_from_pocket: fromPocketId ?? null,
+    p_to_type: input.toType,
+    p_to_pocket: toPocketId ?? null,
+    p_amount: amount,
+    p_note: input.note?.trim() || null,
+    p_created_by: session.profileId,
+    p_client_token: safeToken(input.clientToken),
+  });
 
-    if (!toPocketData) return { success: false, error: "Pocket tujuan tidak ditemukan." };
-    toPocket = { id: toPocketData.id, name: toPocketData.name, balance: Number(toPocketData.balance) };
+  if (error) return { success: false, error: rpcError(error, "Gagal membuat transfer.") };
+
+  await logAudit(
+    supabase,
+    session.familyId,
+    session.profileId,
+    "pocket_transfer",
+    transferId ?? null,
+    "create",
+    null,
+    { amount, fromType: input.fromType, toType: input.toType }
+  );
+
+  // Pocket "Tabungan {Nama}" adalah cermin dari celengan anak.
+  if (fromPocketId) {
+    const name = nameById.get(fromPocketId)!;
+    await syncChildSaldoFromPocket(supabase, session.familyId, name, -amount);
+    await revalidateChildSavingsPocket(supabase, session.familyId, name);
   }
-
-  const { data: transfer, error } = await supabase
-    .from("pocket_transfers")
-    .insert({
-      family_id: session.familyId,
-      from_type: input.fromType,
-      from_pocket_id: input.fromType === "pocket" ? input.fromPocketId : null,
-      to_type: input.toType,
-      to_pocket_id: input.toType === "pocket" ? input.toPocketId : null,
-      amount: input.amount,
-      note: input.note?.trim() || null,
-      created_by: session.profileId,
-    })
-    .select("id")
-    .single();
-
-  if (error || !transfer) return { success: false, error: "Gagal membuat transfer." };
-
-  if (fromPocket) {
-    const newBalance = fromPocket.balance - input.amount;
-    await supabase.from("pockets").update({ balance: newBalance }).eq("id", fromPocket.id);
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", fromPocket.id, "transfer_out", {
-      balance: fromPocket.balance,
-    }, { balance: newBalance });
-    await syncChildSaldoFromPocket(supabase, session.familyId, fromPocket.name, -input.amount);
-  }
-
-  if (toPocket) {
-    const newToBalance = toPocket.balance + input.amount;
-    await supabase.from("pockets").update({ balance: newToBalance }).eq("id", toPocket.id);
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", toPocket.id, "transfer_in", {
-      balance: toPocket.balance,
-    }, { balance: newToBalance });
-    await syncChildSaldoFromPocket(supabase, session.familyId, toPocket.name, input.amount);
+  if (toPocketId) {
+    const name = nameById.get(toPocketId)!;
+    await syncChildSaldoFromPocket(supabase, session.familyId, name, amount);
+    await revalidateChildSavingsPocket(supabase, session.familyId, name);
   }
 
   revalidateKeuangan();
-  if (fromPocket) await revalidateChildSavingsPocket(supabase, session.familyId, fromPocket.name);
-  if (toPocket) await revalidateChildSavingsPocket(supabase, session.familyId, toPocket.name);
   return { success: true };
 }
 
@@ -546,7 +380,7 @@ export interface TransferHistoryResult {
 }
 
 export async function getTransferHistory(page = 1, pageSize = 20): Promise<TransferHistoryResult> {
-  const session = await getCurrentSession();
+  const session = await requireFinanceSession();
   if (!session) return { items: [], total: 0, page, pageSize };
 
   const supabase = createAdminClient();
@@ -568,7 +402,11 @@ export async function getTransferHistory(page = 1, pageSize = 20): Promise<Trans
     if (row.to_pocket_id) pocketIds.add(row.to_pocket_id);
   }
 
-  const { data: pockets } = await supabase.from("pockets").select("id, name").in("id", Array.from(pocketIds));
+  const { data: pockets } = await supabase
+    .from("pockets")
+    .select("id, name")
+    .eq("family_id", session.familyId)
+    .in("id", Array.from(pocketIds));
   const nameMap = new Map((pockets ?? []).map((p) => [p.id, p.name]));
 
   const items: TransferHistoryItem[] = data.map((row) => ({
@@ -588,109 +426,85 @@ export async function getTransferHistory(page = 1, pageSize = 20): Promise<Trans
   return { items, total: count ?? 0, page, pageSize };
 }
 
-/** Hapus riwayat transfer & kembalikan saldo pocket terkait seperti sebelum transfer terjadi. */
+/**
+ * HAPUS RIWAYAT TRANSFER — hanya menghapus record.
+ *
+ * Perilaku lama mengembalikan nominal ke saldo asal (dan mengurangi tujuan),
+ * yang keliru: uang sudah benar-benar berpindah. Fungsi ini SENGAJA tidak
+ * menyentuh saldo apa pun; RPC fin_delete_transfer hanya menjalankan DELETE.
+ *
+ * Untuk benar-benar memindahkan uang kembali, gunakan reverseTransfer() —
+ * operasi terpisah yang membuat transaksi pembalik baru.
+ */
 export async function deletePocketTransfer(id: string): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+  if (!isUuid(id)) return { success: false, error: "Riwayat transfer tidak ditemukan." };
 
   const supabase = createAdminClient();
   const { data: transfer } = await supabase
     .from("pocket_transfers")
-    .select("id, from_type, from_pocket_id, to_type, to_pocket_id, amount")
+    .select("id, from_type, from_pocket_id, to_type, to_pocket_id, amount, note, created_at")
     .eq("id", id)
     .eq("family_id", session.familyId)
     .maybeSingle();
 
   if (!transfer) return { success: false, error: "Riwayat transfer tidak ditemukan." };
 
-  const amount = Number(transfer.amount);
+  const { error } = await supabase.rpc("fin_delete_transfer", {
+    p_transfer_id: id,
+    p_family_id: session.familyId,
+  });
 
-  if (transfer.from_type === "pocket" && transfer.from_pocket_id) {
-    const { data: pocket } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", transfer.from_pocket_id)
-      .maybeSingle();
+  if (error) return { success: false, error: rpcError(error, "Gagal menghapus riwayat transfer.") };
 
-    if (pocket) {
-      const balanceBefore = Number(pocket.balance);
-      const balanceAfter = balanceBefore + amount;
-      await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
-      await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "transfer_delete_revert", {
-        balance: balanceBefore,
-      }, { balance: balanceAfter });
-      await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, balanceAfter - balanceBefore);
-      await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
-    }
-  }
-
-  if (transfer.to_type === "pocket" && transfer.to_pocket_id) {
-    const { data: pocket } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", transfer.to_pocket_id)
-      .maybeSingle();
-
-    if (pocket) {
-      const balanceBefore = Number(pocket.balance);
-      const balanceAfter = Math.max(0, balanceBefore - amount);
-      await supabase.from("pockets").update({ balance: balanceAfter }).eq("id", pocket.id);
-      await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "transfer_delete_revert", {
-        balance: balanceBefore,
-      }, { balance: balanceAfter });
-      await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, balanceAfter - balanceBefore);
-      await revalidateChildSavingsPocket(supabase, session.familyId, pocket.name);
-    }
-  }
-
-  const { error } = await supabase.from("pocket_transfers").delete().eq("id", id).eq("family_id", session.familyId);
-  if (error) return { success: false, error: "Gagal menghapus riwayat transfer." };
-
-  await logAudit(supabase, session.familyId, session.profileId, "pocket_transfer", id, "delete", { amount }, null);
+  // Jejak teknis tetap tersimpan di audit_logs (tidak tampil di riwayat pengguna).
+  await logAudit(
+    supabase,
+    session.familyId,
+    session.profileId,
+    "pocket_transfer",
+    id,
+    "delete_history",
+    {
+      amount: Number(transfer.amount),
+      from_type: transfer.from_type,
+      from_pocket_id: transfer.from_pocket_id,
+      to_type: transfer.to_type,
+      to_pocket_id: transfer.to_pocket_id,
+      note: transfer.note,
+      created_at: transfer.created_at,
+    },
+    null
+  );
 
   revalidateKeuangan();
   return { success: true };
 }
 
-// ---------------------------------------------------------------------------
-// Produk anti-duplicate
-// ---------------------------------------------------------------------------
+/** Batalkan transfer — membuat transaksi pembalik. Berbeda dari hapus riwayat. */
+export async function reverseTransfer(id: string): Promise<ActionResult> {
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+  if (!isUuid(id)) return { success: false, error: "Transfer tidak ditemukan." };
 
-async function resolveProduct(supabase: AdminClient, familyId: string, name: string, price: number): Promise<string | null> {
-  const normalized = normalizeProductName(name);
+  const supabase = createAdminClient();
+  const { error } = await supabase.rpc("fin_reverse_transfer", {
+    p_transfer_id: id,
+    p_family_id: session.familyId,
+    p_created_by: session.profileId,
+  });
 
-  const { data: existing } = await supabase
-    .from("products")
-    .select("id, last_price, avg_price, buy_count")
-    .eq("family_id", familyId)
-    .eq("name_normalized", normalized)
-    .maybeSingle();
+  if (error) return { success: false, error: rpcError(error, "Gagal membatalkan transfer.") };
 
-  if (existing) {
-    const buyCount = existing.buy_count + 1;
-    const avgPrice = (Number(existing.avg_price) * existing.buy_count + price) / buyCount;
-    await supabase
-      .from("products")
-      .update({ last_price: price, avg_price: avgPrice, buy_count: buyCount, updated_at: new Date().toISOString() })
-      .eq("id", existing.id);
-    return existing.id;
-  }
-
-  const { data: created } = await supabase
-    .from("products")
-    .insert({
-      family_id: familyId,
-      name: name.trim(),
-      name_normalized: normalized,
-      last_price: price,
-      avg_price: price,
-      buy_count: 1,
-    })
-    .select("id")
-    .single();
-
-  return created?.id ?? null;
+  await logAudit(supabase, session.familyId, session.profileId, "pocket_transfer", id, "reverse", null, null);
+  revalidateKeuangan();
+  return { success: true };
 }
+
+// ---------------------------------------------------------------------------
+// Produk (anti-duplicate + autocomplete)
+// ---------------------------------------------------------------------------
 
 export interface ProductSuggestion {
   id: string;
@@ -700,584 +514,73 @@ export interface ProductSuggestion {
   buyCount: number;
 }
 
+/**
+ * Saran nama barang. Sumbernya digabung dari produk transaksi sebelumnya
+ * (tabel products) dan nama barang pada rencana belanja sebelumnya (G.7).
+ */
 export async function searchProducts(query: string): Promise<ProductSuggestion[]> {
-  const session = await getCurrentSession();
-  if (!session) return [];
-  if (!query.trim()) return [];
-
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("products")
-    .select("id, name, last_price, avg_price, buy_count")
-    .eq("family_id", session.familyId)
-    .ilike("name", `%${query.trim()}%`)
-    .order("buy_count", { ascending: false })
-    .limit(8);
-
-  return (data ?? []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    lastPrice: Number(p.last_price),
-    avgPrice: Number(p.avg_price),
-    buyCount: p.buy_count,
-  }));
-}
-
-// ---------------------------------------------------------------------------
-// Belanja: manual / scan
-// ---------------------------------------------------------------------------
-
-export interface AddShoppingTransactionInput {
-  name: string;
-  qty: number;
-  price: number;
-  date: string;
-  pocketId: string | null;
-  source?: ShoppingTransactionSource;
-}
-
-export async function addShoppingTransaction(input: AddShoppingTransactionInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const name = input.name.trim();
-  if (!name) return { success: false, error: "Nama barang wajib diisi." };
-  if (!Number.isFinite(input.qty) || input.qty <= 0) return { success: false, error: "Qty tidak valid." };
-  if (!Number.isFinite(input.price) || input.price < 0) return { success: false, error: "Harga tidak valid." };
-
-  const supabase = createAdminClient();
-  const total = Math.round(input.qty * input.price);
-
-  let pocket: { id: string; name: string; balance: number } | null = null;
-  if (input.pocketId) {
-    const { data } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", input.pocketId)
-      .eq("family_id", session.familyId)
-      .maybeSingle();
-
-    if (!data) return { success: false, error: "Pocket tidak ditemukan." };
-    if (Number(data.balance) < total) {
-      return { success: false, error: `Saldo pocket tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
-    }
-    pocket = { id: data.id, name: data.name, balance: Number(data.balance) };
-  }
-
-  const productId = await resolveProduct(supabase, session.familyId, name, input.price);
-
-  const { error } = await supabase.from("shopping_transactions").insert({
-    family_id: session.familyId,
-    plan_id: null,
-    pocket_id: input.pocketId,
-    product_id: productId,
-    name,
-    qty: input.qty,
-    price: input.price,
-    total,
-    date: input.date,
-    source: input.source ?? "manual",
-    created_by: session.profileId,
-  });
-
-  if (error) return { success: false, error: "Gagal menyimpan transaksi belanja." };
-
-  if (pocket) {
-    const newBalance = pocket.balance - total;
-    await supabase.from("pockets").update({ balance: newBalance }).eq("id", pocket.id);
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "shopping_expense", {
-      balance: pocket.balance,
-    }, { balance: newBalance });
-    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -total);
-  }
-
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export interface AddShoppingTransactionsBatchInput {
-  pocketId: string | null;
-  date: string;
-  source: ShoppingTransactionSource;
-  items: { name: string; qty: number; price: number }[];
-}
-
-export async function addShoppingTransactionsBatch(input: AddShoppingTransactionsBatchInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const items = input.items
-    .map((item) => ({ name: item.name.trim(), qty: Number(item.qty) || 1, price: Number(item.price) || 0 }))
-    .filter((item) => item.name.length > 0);
-
-  if (items.length === 0) return { success: false, error: "Tidak ada item untuk disimpan." };
-
-  const total = items.reduce((acc, item) => acc + Math.round(item.qty * item.price), 0);
-
-  const supabase = createAdminClient();
-
-  let pocket: { id: string; name: string; balance: number } | null = null;
-  if (input.pocketId) {
-    const { data } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", input.pocketId)
-      .eq("family_id", session.familyId)
-      .maybeSingle();
-
-    if (!data) return { success: false, error: "Pocket tidak ditemukan." };
-    if (Number(data.balance) < total) {
-      return { success: false, error: `Saldo pocket tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
-    }
-    pocket = { id: data.id, name: data.name, balance: Number(data.balance) };
-  }
-
-  for (const item of items) {
-    const productId = await resolveProduct(supabase, session.familyId, item.name, item.price);
-    await supabase.from("shopping_transactions").insert({
-      family_id: session.familyId,
-      plan_id: null,
-      pocket_id: input.pocketId,
-      product_id: productId,
-      name: item.name,
-      qty: item.qty,
-      price: item.price,
-      total: Math.round(item.qty * item.price),
-      date: input.date,
-      source: input.source,
-      created_by: session.profileId,
-    });
-  }
-
-  if (pocket) {
-    const newBalance = pocket.balance - total;
-    await supabase.from("pockets").update({ balance: newBalance }).eq("id", pocket.id);
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "shopping_expense", {
-      balance: pocket.balance,
-    }, { balance: newBalance });
-    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -total);
-  }
-
-  revalidateKeuangan();
-  return { success: true };
-}
-
-// ---------------------------------------------------------------------------
-// Riwayat belanja per bulan
-// ---------------------------------------------------------------------------
-
-export interface ShoppingHistoryItem {
-  id: string;
-  name: string;
-  qty: number;
-  price: number;
-  total: number;
-  date: string;
-  source: ShoppingTransactionSource;
-  pocketName: string | null;
-}
-
-export interface ShoppingHistoryResult {
-  items: ShoppingHistoryItem[];
-  total: number;
-}
-
-export async function getShoppingHistory(month?: string): Promise<ShoppingHistoryResult> {
-  const session = await getCurrentSession();
-  if (!session) return { items: [], total: 0 };
-
-  const targetMonth = month ?? currentMonth();
-  const { start, end } = monthRange(targetMonth);
-
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("shopping_transactions")
-    .select("id, name, qty, price, total, date, source, pocket_id")
-    .eq("family_id", session.familyId)
-    .gte("date", start)
-    .lte("date", end)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  if (!data || data.length === 0) return { items: [], total: 0 };
-
-  const pocketIds = Array.from(new Set(data.map((d) => d.pocket_id).filter((id): id is string => Boolean(id))));
-  const { data: pockets } =
-    pocketIds.length > 0 ? await supabase.from("pockets").select("id, name").in("id", pocketIds) : { data: [] };
-  const nameMap = new Map((pockets ?? []).map((p) => [p.id, p.name]));
-
-  const items: ShoppingHistoryItem[] = data.map((d) => ({
-    id: d.id,
-    name: d.name,
-    qty: d.qty,
-    price: Number(d.price),
-    total: Number(d.total),
-    date: d.date,
-    source: d.source,
-    pocketName: d.pocket_id ? nameMap.get(d.pocket_id) ?? null : null,
-  }));
-
-  return { items, total: items.reduce((acc, i) => acc + i.total, 0) };
-}
-
-// ---------------------------------------------------------------------------
-// Rencana belanja + checklist
-// ---------------------------------------------------------------------------
-
-export interface ShoppingPlanItem {
-  id: string;
-  name: string;
-  qty: number;
-  estimatedPrice: number;
-  actualPrice: number | null;
-  checked: boolean;
-}
-
-export interface ShoppingPlanWithItems {
-  id: string;
-  name: string;
-  plannedDate: string | null;
-  status: string;
-  totalEstimated: number;
-  totalActual: number;
-  items: ShoppingPlanItem[];
-}
-
-export async function getShoppingPlans(): Promise<ShoppingPlanWithItems[]> {
-  const session = await getCurrentSession();
+  const session = await requireFinanceSession();
   if (!session) return [];
 
+  const term = query.trim();
+  if (term.length < 2) return [];
+
   const supabase = createAdminClient();
-  const { data: plans } = await supabase
+
+  // Plan item difilter lewat daftar plan milik keluarga ini — bukan join
+  // implisit — supaya batas family_id tetap eksplisit.
+  const { data: familyPlans } = await supabase
     .from("shopping_plans")
-    .select("id, name, planned_date, status, total_estimated, total_actual")
-    .eq("family_id", session.familyId)
-    .neq("status", "archived")
-    .order("created_at", { ascending: false });
-
-  if (!plans || plans.length === 0) return [];
-
-  const { data: items } = await supabase
-    .from("shopping_plan_items")
-    .select("id, plan_id, name, qty, estimated_price, actual_price, checked")
-    .in("plan_id", plans.map((p) => p.id))
-    .order("created_at", { ascending: true });
-
-  return plans.map((p) => ({
-    id: p.id,
-    name: p.name,
-    plannedDate: p.planned_date,
-    status: p.status,
-    totalEstimated: Number(p.total_estimated),
-    totalActual: Number(p.total_actual),
-    items: (items ?? [])
-      .filter((i) => i.plan_id === p.id)
-      .map((i) => ({
-        id: i.id,
-        name: i.name,
-        qty: i.qty,
-        estimatedPrice: Number(i.estimated_price),
-        actualPrice: i.actual_price !== null ? Number(i.actual_price) : null,
-        checked: i.checked,
-      })),
-  }));
-}
-
-export interface CreateShoppingPlanInput {
-  name: string;
-  plannedDate?: string;
-}
-
-export async function createShoppingPlan(input: CreateShoppingPlanInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const name = input.name.trim();
-  if (!name) return { success: false, error: "Nama rencana wajib diisi." };
-
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("shopping_plans").insert({
-    family_id: session.familyId,
-    name,
-    planned_date: input.plannedDate || null,
-    created_by: session.profileId,
-  });
-
-  if (error) return { success: false, error: "Gagal membuat rencana belanja." };
-
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export interface AddPlanItemInput {
-  planId: string;
-  name: string;
-  qty: number;
-  estimatedPrice: number;
-}
-
-async function recalcPlanTotals(supabase: AdminClient, planId: string) {
-  const { data: items } = await supabase
-    .from("shopping_plan_items")
-    .select("qty, estimated_price, actual_price")
-    .eq("plan_id", planId);
-
-  const totalEstimated = (items ?? []).reduce((acc, i) => acc + Number(i.estimated_price) * i.qty, 0);
-  const totalActual = (items ?? []).reduce(
-    (acc, i) => acc + (i.actual_price !== null ? Number(i.actual_price) * i.qty : 0),
-    0
-  );
-
-  await supabase.from("shopping_plans").update({ total_estimated: totalEstimated, total_actual: totalActual }).eq("id", planId);
-}
-
-export async function addPlanItem(input: AddPlanItemInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const name = input.name.trim();
-  if (!name) return { success: false, error: "Nama barang wajib diisi." };
-  if (!Number.isFinite(input.qty) || input.qty <= 0) return { success: false, error: "Qty tidak valid." };
-  if (!Number.isFinite(input.estimatedPrice) || input.estimatedPrice < 0) {
-    return { success: false, error: "Estimasi harga tidak valid." };
-  }
-
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("shopping_plan_items").insert({
-    plan_id: input.planId,
-    name,
-    qty: input.qty,
-    estimated_price: input.estimatedPrice,
-  });
-
-  if (error) return { success: false, error: "Gagal menambah barang." };
-
-  await recalcPlanTotals(supabase, input.planId);
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export async function togglePlanItem(itemId: string, checked: boolean): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("shopping_plan_items").update({ checked }).eq("id", itemId);
-  if (error) return { success: false, error: "Gagal memperbarui item." };
-
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export async function deletePlanItem(itemId: string): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const supabase = createAdminClient();
-  const { data: item } = await supabase.from("shopping_plan_items").select("plan_id").eq("id", itemId).maybeSingle();
-  if (!item) return { success: false, error: "Item tidak ditemukan." };
-
-  const { error } = await supabase.from("shopping_plan_items").delete().eq("id", itemId);
-  if (error) return { success: false, error: "Gagal menghapus item." };
-
-  await recalcPlanTotals(supabase, item.plan_id);
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export interface CheckoutPlanItemInput {
-  itemId: string;
-  actualPrice: number;
-  pocketId: string | null;
-  date: string;
-}
-
-export async function checkoutPlanItem(input: CheckoutPlanItemInput): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  if (!Number.isFinite(input.actualPrice) || input.actualPrice < 0) {
-    return { success: false, error: "Harga aktual tidak valid." };
-  }
-
-  const supabase = createAdminClient();
-  const { data: item } = await supabase
-    .from("shopping_plan_items")
-    .select("id, plan_id, name, qty")
-    .eq("id", input.itemId)
-    .maybeSingle();
-
-  if (!item) return { success: false, error: "Item tidak ditemukan." };
-
-  const total = Math.round(item.qty * input.actualPrice);
-
-  let pocket: { id: string; name: string; balance: number } | null = null;
-  if (input.pocketId) {
-    const { data } = await supabase
-      .from("pockets")
-      .select("id, name, balance")
-      .eq("id", input.pocketId)
-      .eq("family_id", session.familyId)
-      .maybeSingle();
-
-    if (!data) return { success: false, error: "Pocket tidak ditemukan." };
-    if (Number(data.balance) < total) {
-      return { success: false, error: `Saldo pocket tidak cukup (tersisa ${formatRupiah(Number(data.balance))}).` };
-    }
-    pocket = { id: data.id, name: data.name, balance: Number(data.balance) };
-  }
-
-  const productId = await resolveProduct(supabase, session.familyId, item.name, input.actualPrice);
-
-  const { error: trxError } = await supabase.from("shopping_transactions").insert({
-    family_id: session.familyId,
-    plan_id: item.plan_id,
-    pocket_id: input.pocketId,
-    product_id: productId,
-    name: item.name,
-    qty: item.qty,
-    price: input.actualPrice,
-    total,
-    date: input.date,
-    source: "plan",
-    created_by: session.profileId,
-  });
-
-  if (trxError) return { success: false, error: "Gagal mencatat transaksi belanja." };
-
-  if (pocket) {
-    const newBalance = pocket.balance - total;
-    await supabase.from("pockets").update({ balance: newBalance }).eq("id", pocket.id);
-    await logAudit(supabase, session.familyId, session.profileId, "pocket", pocket.id, "shopping_expense", {
-      balance: pocket.balance,
-    }, { balance: newBalance });
-    await syncChildSaldoFromPocket(supabase, session.familyId, pocket.name, -total);
-  }
-
-  await supabase.from("shopping_plan_items").update({ checked: true, actual_price: input.actualPrice }).eq("id", input.itemId);
-  await recalcPlanTotals(supabase, item.plan_id);
-
-  const { data: items } = await supabase.from("shopping_plan_items").select("checked").eq("plan_id", item.plan_id);
-  if (items && items.length > 0 && items.every((i) => i.checked)) {
-    await supabase.from("shopping_plans").update({ status: "done" }).eq("id", item.plan_id);
-  }
-
-  revalidateKeuangan();
-  return { success: true };
-}
-
-export async function archivePlan(planId: string): Promise<ActionResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const supabase = createAdminClient();
-  const { error } = await supabase
-    .from("shopping_plans")
-    .update({ status: "archived" })
-    .eq("id", planId)
+    .select("id")
     .eq("family_id", session.familyId);
+  const planIds = (familyPlans ?? []).map((p) => p.id);
 
-  if (error) return { success: false, error: "Gagal mengarsipkan rencana." };
+  const [productsRes, planItemsRes] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, name, last_price, avg_price, buy_count")
+      .eq("family_id", session.familyId)
+      .ilike("name", `%${term}%`)
+      .order("buy_count", { ascending: false })
+      .limit(8),
+    planIds.length > 0
+      ? supabase
+          .from("shopping_plan_items")
+          .select("id, name, estimated_price")
+          .in("plan_id", planIds)
+          .ilike("name", `%${term}%`)
+          .limit(8)
+      : Promise.resolve({ data: [] as { id: string; name: string; estimated_price: number }[] }),
+  ]);
 
-  revalidateKeuangan();
-  return { success: true };
-}
+  const seen = new Set<string>();
+  const suggestions: ProductSuggestion[] = [];
 
-// ---------------------------------------------------------------------------
-// AI Receipt Scan (GPT-4o Vision)
-// ---------------------------------------------------------------------------
-
-export interface ScannedItem {
-  name: string;
-  qty: number;
-  price: number;
-}
-
-export interface ScanReceiptResult {
-  success: boolean;
-  error?: string;
-  storeName?: string;
-  date?: string;
-  items?: ScannedItem[];
-  total?: number;
-}
-
-export async function scanReceipt(imageBase64: string, mode: "quick" | "full"): Promise<ScanReceiptResult> {
-  const session = await requireAdmin();
-  if (!session) return { success: false, error: "Tidak diizinkan." };
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return {
-      success: false,
-      error: "OPENAI_API_KEY belum diisi di .env.local. Tambahkan API key untuk mengaktifkan fitur scan AI.",
-    };
-  }
-
-  if (!imageBase64.startsWith("data:image")) {
-    return { success: false, error: "Format gambar tidak valid." };
-  }
-
-  const prompt =
-    mode === "quick"
-      ? 'Kamu adalah asisten yang membaca foto struk belanja. Baca foto ini dan kembalikan HANYA JSON dengan format: {"storeName": string, "date": "YYYY-MM-DD", "total": number}. "total" adalah total belanja dalam Rupiah (angka saja, tanpa titik/koma/simbol). Jika tanggal tidak terbaca, gunakan tanggal hari ini.'
-      : 'Kamu adalah asisten yang membaca foto struk belanja. Baca foto ini dan kembalikan HANYA JSON dengan format: {"storeName": string, "date": "YYYY-MM-DD", "items": [{"name": string, "qty": number, "price": number}], "total": number}. "price" adalah harga satuan dalam Rupiah (angka saja, tanpa titik/koma/simbol). Jika tanggal tidak terbaca, gunakan tanggal hari ini.';
-
-  try {
-    const { default: OpenAI } = await import("openai");
-    const client = new OpenAI({ apiKey });
-
-    const response = await client.chat.completions.create({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
-      max_tokens: 1500,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: imageBase64 } },
-          ],
-        },
-      ],
+  for (const p of productsRes.data ?? []) {
+    const key = normalizeProductName(p.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    suggestions.push({
+      id: p.id,
+      name: p.name,
+      lastPrice: Number(p.last_price),
+      avgPrice: Number(p.avg_price),
+      buyCount: p.buy_count,
     });
-
-    const raw = response.choices[0]?.message?.content;
-    if (!raw) return { success: false, error: "AI tidak memberikan respons." };
-
-    const parsed = JSON.parse(raw) as {
-      storeName?: string;
-      date?: string;
-      total?: number;
-      items?: { name?: string; qty?: number; price?: number }[];
-    };
-
-    if (mode === "quick") {
-      return {
-        success: true,
-        storeName: parsed.storeName,
-        date: parsed.date,
-        total: Number(parsed.total) || 0,
-      };
-    }
-
-    const items: ScannedItem[] = Array.isArray(parsed.items)
-      ? parsed.items.map((i) => ({
-          name: String(i.name ?? "").trim() || "Item",
-          qty: Number(i.qty) || 1,
-          price: Number(i.price) || 0,
-        }))
-      : [];
-
-    return {
-      success: true,
-      storeName: parsed.storeName,
-      date: parsed.date,
-      items,
-      total: Number(parsed.total) || items.reduce((acc, i) => acc + i.qty * i.price, 0),
-    };
-  } catch (err) {
-    console.error("scanReceipt error", err);
-    return { success: false, error: "Gagal membaca struk. Coba foto ulang dengan pencahayaan lebih baik." };
   }
+
+  for (const i of planItemsRes.data ?? []) {
+    const key = normalizeProductName(i.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    suggestions.push({
+      id: i.id,
+      name: i.name,
+      lastPrice: Number(i.estimated_price),
+      avgPrice: Number(i.estimated_price),
+      buyCount: 0,
+    });
+  }
+
+  return suggestions.slice(0, 10);
 }

@@ -1,4 +1,6 @@
-export type BgmTrack = "login" | "daffa_room" | "dio_room" | "admin_home";
+// Halaman pemilihan profil sengaja TIDAK punya track: tidak ada musik yang
+// diputar otomatis di layar awal (B.1).
+export type BgmTrack = "daffa_room" | "dio_room" | "admin_home";
 
 export type SfxName = "pop" | "coin" | "bark" | "sleep" | "wake" | "click" | "level_up" | "unlock" | "task_done";
 

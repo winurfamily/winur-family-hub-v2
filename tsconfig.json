@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    // target es2022 dibutuhkan agar `await` tingkat atas di tests/*.test.ts
+    // lolos `tsc --noEmit`. Tidak memengaruhi bundle: Next memakai SWC, dan
+    // konfigurasi ini noEmit dengan `lib` yang sudah ditetapkan eksplisit.
+    "target": "es2022",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,

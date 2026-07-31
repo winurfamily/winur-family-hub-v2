@@ -222,6 +222,42 @@
   .safe-top {
     padding-top: env(safe-area-inset-top);
   }
+  .safe-x {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Tinggi viewport yang stabil saat keyboard mobile muncul (J.14).
+     dvh mengikuti area terlihat; vh dipertahankan sebagai fallback. */
+  .min-h-screen-dvh {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .h-screen-dvh {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* Target sentuh minimum 44x44 (J.3) tanpa memaksa ukuran visual elemen. */
+  .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Tab yang bisa digeser dengan snap di layar sempit (F1.3). */
+  .snap-tabs {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .snap-tabs > * {
+    scroll-snap-align: center;
+  }
+
+  /* Angka keuangan: rata kolom & mudah dibandingkan. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 
   /* Glassmorphism — panel game premium, dipakai di seluruh Dunia Anak */
   .glass-panel {
