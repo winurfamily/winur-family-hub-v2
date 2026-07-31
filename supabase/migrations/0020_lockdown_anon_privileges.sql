@@ -45,6 +45,35 @@ revoke all on all tables    in schema public from anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 revoke all on all routines  in schema public from anon, authenticated;
 
+-- PENTING — mencabut dari anon/authenticated saja TIDAK cukup untuk function.
+-- Postgres memberi EXECUTE ke role bawaan PUBLIC pada setiap function baru,
+-- dan anon/authenticated mewarisi hak itu lewat PUBLIC. Tanpa langkah di bawah,
+-- seluruh RPC fin_* tetap bisa dipanggil memakai anon key.
+--
+-- Function milik extension sengaja dilewati: mencabut EXECUTE dari PUBLIC pada
+-- fungsi pgcrypto/uuid-ossp dsb. bisa merusak default value kolom dan operator
+-- indeks yang dipakai role lain.
+do $$
+declare
+  fn record;
+begin
+  for fn in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      -- 'f' = function, 'p' = procedure. Aggregate/window function dilewati:
+      -- keduanya bukan jalur yang bisa dipanggil lewat PostgREST.
+      and p.prokind in ('f', 'p')
+      and not exists (
+        select 1 from pg_depend d
+        where d.objid = p.oid and d.deptype = 'e'
+      )
+  loop
+    execute format('revoke all on routine %s from public, anon, authenticated', fn.sig);
+  end loop;
+end $$;
+
 -- `usage on schema public` sengaja DIPERTAHANKAN supaya PostgREST tetap bisa
 -- membalas dengan error izin yang benar, bukan gagal memuat schema cache.
 
@@ -63,6 +92,9 @@ begin
         'alter default privileges for role %I in schema public revoke all on sequences from anon, authenticated', owner_role);
       execute format(
         'alter default privileges for role %I in schema public revoke all on routines from anon, authenticated', owner_role);
+      -- Sekali lagi: PUBLIC-lah sumber EXECUTE default untuk function baru.
+      execute format(
+        'alter default privileges for role %I in schema public revoke execute on routines from public', owner_role);
     end if;
   end loop;
 exception
@@ -91,24 +123,33 @@ do $$
 declare
   leaky text;
 begin
-  select string_agg(distinct table_name, ', ')
+  -- has_table_privilege dipakai (bukan information_schema.role_table_grants)
+  -- karena ia ikut memperhitungkan hak yang diwarisi lewat role PUBLIC.
+  select string_agg(distinct c.relname, ', ')
     into leaky
-  from information_schema.role_table_grants
-  where table_schema = 'public'
-    and grantee in ('anon', 'authenticated');
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join (values ('anon'::name), ('authenticated'::name)) as r(role_name)
+  cross join (values ('select'::text), ('insert'), ('update'), ('delete')) as p(priv)
+  where n.nspname = 'public'
+    and c.relkind in ('r', 'p', 'v', 'm')
+    and has_table_privilege(r.role_name, c.oid, p.priv);
 
   if leaky is not null then
     raise exception 'Masih ada privilege anon/authenticated di tabel: %', leaky;
   end if;
 
+  -- Diperiksa untuk SELURUH function buatan sendiri di public, bukan hanya
+  -- fin_*, supaya helper lain tidak diam-diam tetap terbuka.
   select string_agg(distinct p.proname, ', ')
     into leaky
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
+    and p.prokind in ('f', 'p')
+    and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
     and (has_function_privilege('anon', p.oid, 'execute')
-      or has_function_privilege('authenticated', p.oid, 'execute'))
-    and p.proname like 'fin\_%';
+      or has_function_privilege('authenticated', p.oid, 'execute'));
 
   if leaky is not null then
     raise exception 'anon/authenticated masih bisa EXECUTE RPC: %', leaky;
