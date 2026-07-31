@@ -13,7 +13,7 @@ begin;
 do $$
 declare
   v_family_id uuid := '00000000-0000-0000-0000-000000000000';
-  v_confirm text := 'TYPE_RESET_FINANCE_FOR_TEST_HERE';
+  v_confirm text := 'NOT_CONFIRMED';
   v_receipt_paths text[];
   v_finance_pocket_ids uuid[];
 begin
@@ -51,6 +51,7 @@ begin
       where p.family_id = v_family_id
     )),
     ('receipt_attachments', (select count(*) from receipt_attachments where family_id = v_family_id)),
+    ('monthly_budgets', (select count(*) from monthly_budgets where family_id = v_family_id)),
     ('receipt_storage_objects', (
       select count(*)
       from storage.objects
@@ -107,6 +108,7 @@ begin
 
   delete from shopping_transactions where family_id = v_family_id;
   delete from shopping_plans where family_id = v_family_id;
+  delete from monthly_budgets where family_id = v_family_id;
   delete from pocket_transfers where family_id = v_family_id;
   delete from income where family_id = v_family_id;
 
