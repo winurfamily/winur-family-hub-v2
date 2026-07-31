@@ -3,19 +3,19 @@ import type { BgmTrack, SfxName, VoiceCharacter, VoiceLine } from "./types";
 export const BGM_FILES: Record<BgmTrack, string> = {
   daffa_room: "/sounds/bgm/room.mp3",
   dio_room: "/sounds/bgm/room.mp3",
-  admin_home: "/sounds/bgm/admin_home.mp3",
+  admin_home: "/sounds/bgm/room.mp3",
 };
 
 export const SFX_FILES: Record<SfxName, string> = {
-  pop: "/sounds/sfx/pop.mp3",
-  coin: "/sounds/sfx/coin.mp3",
-  bark: "/sounds/sfx/bark.mp3",
-  sleep: "/sounds/sfx/sleep.mp3",
-  wake: "/sounds/sfx/wake.mp3",
-  click: "/sounds/sfx/click.mp3",
-  level_up: "/sounds/sfx/level_up.mp3",
-  unlock: "/sounds/sfx/unlock.mp3",
-  task_done: "/sounds/sfx/task_done.mp3",
+  pop: "/sounds/tap.wav",
+  coin: "/sounds/claim.wav",
+  bark: "/sounds/pet_idle.wav",
+  sleep: "/sounds/pet_idle.wav",
+  wake: "/sounds/switch.wav",
+  click: "/sounds/tap.wav",
+  level_up: "/sounds/level_up.wav",
+  unlock: "/sounds/unlock.wav",
+  task_done: "/sounds/task_done.wav",
 };
 
 export const VOICE_FILES: Record<VoiceCharacter, Record<VoiceLine, string>> = {
