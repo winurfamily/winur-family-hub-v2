@@ -16,6 +16,7 @@ import { syncChildSaldoFromPocket } from "@/lib/server/child-savings";
 import { resolveProducts } from "@/lib/server/products";
 import { attachReceiptToTransaction, removeReceiptFiles } from "@/lib/server/receipts";
 import { currentMonth, monthRange } from "@/lib/finance";
+import { MAX_ITEM_NAME_LENGTH, normalizeUnit } from "@/lib/shopping-item";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_ALIASES,
@@ -31,6 +32,8 @@ export interface ShoppingItemInput {
   name: string;
   qty: number;
   price: number;
+  /** Satuan ("kg", "liter", "pcs"). Kosong bila barangnya tak bersatuan. */
+  unit?: string;
 }
 
 export interface ShoppingItemView extends ShoppingItemInput {
@@ -86,11 +89,13 @@ function sanitizeItems(items: ShoppingItemInput[]): { items: ShoppingItemInput[]
     const price = toRupiah(raw?.price);
 
     if (!name) return { items: [], error: "Nama barang wajib diisi." };
-    if (name.length > 80) return { items: [], error: `Nama barang "${name.slice(0, 20)}…" terlalu panjang.` };
+    if (name.length > MAX_ITEM_NAME_LENGTH) {
+      return { items: [], error: `Nama barang "${name.slice(0, 20)}…" terlalu panjang.` };
+    }
     if (!Number.isFinite(qty) || qty <= 0) return { items: [], error: `Kuantitas "${name}" harus lebih dari 0.` };
     if (!Number.isFinite(price) || price < 0) return { items: [], error: `Harga "${name}" tidak valid.` };
 
-    clean.push({ name, qty, price });
+    clean.push({ name, qty, price, unit: normalizeUnit(raw?.unit) });
   }
 
   return { items: clean };
@@ -329,6 +334,44 @@ async function syncPocketMirror(
 // Baca
 // ---------------------------------------------------------------------------
 
+interface TransactionItemRow {
+  id: string;
+  name: string;
+  qty: number | string;
+  price: number | string;
+  subtotal: number | string;
+  unit?: string | null;
+}
+
+/**
+ * Rincian barang satu transaksi, beserta satuannya.
+ *
+ * `unit` baru ada setelah migration 0024 diterapkan. Selama belum, PostgREST
+ * menolak kolom itu (42703) — jadi permintaan diulang tanpa `unit` dan detail
+ * transaksi tetap tampil, hanya tanpa satuan. Jalur cadangan ini cuma dipakai
+ * pada lingkungan yang tertinggal, bukan pada setiap pembacaan.
+ */
+async function selectTransactionItems(
+  supabase: ReturnType<typeof createAdminClient>,
+  transactionId: string
+): Promise<{ data: TransactionItemRow[] | null }> {
+  const withUnit = await supabase
+    .from("shopping_transaction_items")
+    .select("id, name, qty, price, subtotal, unit")
+    .eq("transaction_id", transactionId)
+    .order("position");
+
+  if (!withUnit.error) return { data: withUnit.data as TransactionItemRow[] };
+
+  const legacy = await supabase
+    .from("shopping_transaction_items")
+    .select("id, name, qty, price, subtotal")
+    .eq("transaction_id", transactionId)
+    .order("position");
+
+  return { data: (legacy.data ?? []) as TransactionItemRow[] };
+}
+
 export async function getShoppingTransaction(id: string): Promise<ShoppingTransactionView | null> {
   const session = await requireFinanceSession();
   if (!session || !isUuid(id)) return null;
@@ -346,11 +389,7 @@ export async function getShoppingTransaction(id: string): Promise<ShoppingTransa
   if (!data) return null;
 
   const [itemsRes, receiptsRes, pocketRes, profileRes] = await Promise.all([
-    supabase
-      .from("shopping_transaction_items")
-      .select("id, name, qty, price, subtotal")
-      .eq("transaction_id", id)
-      .order("position"),
+    selectTransactionItems(supabase, id),
     supabase
       .from("receipt_attachments")
       .select("id, storage_path, file_size, mime_type, width, height, created_at")
@@ -383,6 +422,7 @@ export async function getShoppingTransaction(id: string): Promise<ShoppingTransa
       name: i.name,
       qty: Number(i.qty),
       price: Number(i.price),
+      unit: normalizeUnit(i.unit),
       subtotal: Number(i.subtotal),
     })),
     receipts: (receiptsRes.data ?? []).map((r) => ({

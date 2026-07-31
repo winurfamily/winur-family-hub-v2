@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CurrencyInput } from "@/components/finance/currency-input";
 import { transferPocket, type PocketSummary } from "@/app/actions/keuangan";
-import { formatRupiah } from "@/lib/format";
+import { formatDate, formatRupiah } from "@/lib/format";
+import { useTodayJakarta } from "@/lib/use-today";
 
 const MAIN = "main";
 
@@ -25,6 +26,7 @@ export function TransferForm({
   bare?: boolean;
   onDone?: () => void;
 }) {
+  const today = useTodayJakarta();
   const [fromValue, setFromValue] = useState(MAIN);
   const [toValue, setToValue] = useState<string>(pockets[0]?.id ?? "external");
   const [amount, setAmount] = useState(0);
@@ -144,6 +146,14 @@ export function TransferForm({
         <Label htmlFor="transfer-amount">Nominal</Label>
         <CurrencyInput id="transfer-amount" value={amount} onValueChange={setAmount} disabled={isPending} />
       </div>
+
+      {/* Transfer tidak punya tanggal yang bisa dipilih: yang dicatat adalah
+          SAAT pemindahannya terjadi. Yang ditampilkan di sini adalah tanggal
+          itu menurut waktu Indonesia, supaya jelas ia bukan tanggal UTC. */}
+      <p className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-[11px] font-semibold text-ink-3">
+        <span>Tercatat pada</span>
+        <span className="font-black text-ink-2">{formatDate(today)} (WIB)</span>
+      </p>
 
       <div className="space-y-1.5">
         <Label htmlFor="transfer-note">{isExternal ? "Untuk apa" : "Catatan (opsional)"}</Label>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Plus, Trash2 } from "lucide-react";
@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CurrencyInput, QtyInput } from "@/components/finance/currency-input";
+import { CurrencyInput } from "@/components/finance/currency-input";
 import { Panel } from "@/components/finance/ui";
+import { ItemLine } from "@/components/finance/item-line";
+import { ItemFieldsRow, UnitDatalist, parseQty, type ItemDraft } from "@/components/finance/item-fields";
 import {
   ResponsiveSheet,
   ResponsiveSheetContent,
@@ -19,16 +21,11 @@ import {
 import { ReceiptUploader, type AttachedReceipt } from "../../_components/receipt-uploader";
 import { completeShoppingPlan, type PlanItemView, type PlanView } from "@/app/actions/rencana";
 import type { FinanceSummary } from "@/app/actions/keuangan";
-import { formatRupiah, todayISODate } from "@/lib/format";
+import { formatRupiah } from "@/lib/format";
+import { MAX_ITEM_NAME_LENGTH } from "@/lib/shopping-item";
+import { useTodayJakarta } from "@/lib/use-today";
 
-interface ExtraRow {
-  key: string;
-  name: string;
-  qty: number;
-  price: number;
-}
-
-const newExtra = (): ExtraRow => ({ key: crypto.randomUUID(), name: "", qty: 1, price: 0 });
+const newExtra = (): ItemDraft => ({ key: crypto.randomUUID(), name: "", qty: "1", unit: "", price: 0 });
 
 /**
  * Penyelesaian belanja: satu layar untuk total yang dibayar, toko, tanggal,
@@ -59,21 +56,34 @@ export function CompleteSheet({
   const pockets = summary?.pockets ?? [];
   const saldoUtama = summary?.saldoUtama ?? 0;
 
+  const today = useTodayJakarta();
+
   const [merchant, setMerchant] = useState(plan.name);
-  const [date, setDate] = useState(plan.plannedDate ?? todayISODate());
+  // Belanja dicatat pada hari BELANJANYA, bukan pada tanggal rencana: rencana
+  // sering dibuat berhari-hari sebelumnya, dan memakai tanggal itu membuat
+  // pengeluaran masuk ke hari yang salah (kadang bulan yang salah).
+  const [date, setDate] = useState(today);
+  const [dateTouched, setDateTouched] = useState(false);
   const [source, setSource] = useState("main");
   const [note, setNote] = useState("");
   const [totalPaid, setTotalPaid] = useState(0);
-  const [extras, setExtras] = useState<ExtraRow[]>([]);
+  const [extras, setExtras] = useState<ItemDraft[]>([]);
   const [receipt, setReceipt] = useState<AttachedReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Setiap kali panel dibuka, tanggalnya kembali ke hari ini yang sebenarnya
+  // — kecuali pengguna memang sudah menggantinya sendiri.
+  useEffect(() => {
+    if (!open || dateTouched) return;
+    setDate(today);
+  }, [open, today, dateTouched]);
 
   const active = items.filter((item) => item.status !== "cancelled");
 
   const estimated = useMemo(
     () =>
       active.reduce((acc, item) => acc + Math.round(item.qty * (item.actualPrice ?? item.estimatedPrice)), 0) +
-      extras.reduce((acc, row) => acc + Math.round(row.qty * row.price), 0),
+      extras.reduce((acc, row) => acc + Math.round(parseQty(row.qty) * row.price), 0),
     [active, extras]
   );
 
@@ -81,7 +91,7 @@ export function CompleteSheet({
   const available = source === "main" ? saldoUtama : pockets.find((p) => p.id === source)?.balance ?? 0;
   const insufficient = total > available;
 
-  const patchExtra = (key: string, next: Partial<ExtraRow>) =>
+  const patchExtra = (key: string, next: Partial<ItemDraft>) =>
     setExtras((current) => current.map((row) => (row.key === key ? { ...row, ...next } : row)));
 
   const submit = (event: React.FormEvent) => {
@@ -89,7 +99,12 @@ export function CompleteSheet({
     if (isPending) return;
 
     const cleanExtras = extras
-      .map((row) => ({ name: row.name.trim(), qty: row.qty, price: row.price }))
+      .map((row) => ({
+        name: row.name.trim(),
+        qty: parseQty(row.qty),
+        unit: row.unit,
+        price: row.price,
+      }))
       .filter((row) => row.name.length > 0);
 
     if (!merchant.trim()) return setError("Nama toko wajib diisi.");
@@ -149,6 +164,7 @@ export function CompleteSheet({
         title="Selesaikan Belanja"
         description="Satu transaksi Pengeluaran kategori Belanja akan dibuat dan saldo berkurang."
       >
+        <UnitDatalist />
         <form onSubmit={submit} className="space-y-3.5" noValidate>
           {remaining > 0 && (
             <p className="rounded-xl bg-primary-light px-3 py-2 text-[11px] font-bold text-primary">
@@ -191,7 +207,10 @@ export function CompleteSheet({
                 id="done-date"
                 type="date"
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  setDateTouched(true);
+                }}
                 disabled={isPending}
                 required
               />
@@ -242,7 +261,7 @@ export function CompleteSheet({
                       <Input
                         value={row.name}
                         onChange={(e) => patchExtra(row.key, { name: e.target.value })}
-                        maxLength={80}
+                        maxLength={MAX_ITEM_NAME_LENGTH}
                         placeholder="Nama barang"
                         aria-label={`Nama barang tambahan ${index + 1}`}
                         disabled={isPending}
@@ -256,18 +275,12 @@ export function CompleteSheet({
                         <Trash2 className="h-4 w-4" aria-hidden />
                       </button>
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <QtyInput
-                        value={row.qty}
-                        onValueChange={(qty) => patchExtra(row.key, { qty })}
+                    <div className="mt-2">
+                      <ItemFieldsRow
+                        index={index}
+                        draft={row}
                         disabled={isPending}
-                        label={`Jumlah barang tambahan ${index + 1}`}
-                      />
-                      <CurrencyInput
-                        value={row.price}
-                        onValueChange={(price) => patchExtra(row.key, { price })}
-                        aria-label={`Harga barang tambahan ${index + 1}`}
-                        disabled={isPending}
+                        onPatch={(patch) => patchExtra(row.key, patch)}
                       />
                     </div>
                   </li>
@@ -275,6 +288,30 @@ export function CompleteSheet({
               </ul>
             )}
           </section>
+
+          {active.length > 0 && (
+            <section className="space-y-2 rounded-2xl bg-surface-2 p-3">
+              <h3 className="font-heading text-sm font-black text-ink-1">
+                Barang dari checklist ({active.length})
+              </h3>
+              <ul className="divide-y divide-border">
+                {active.map((item) => (
+                  <li key={item.id} className="py-1.5">
+                    <ItemLine
+                      name={item.name}
+                      qty={item.qty}
+                      unit={item.unit}
+                      meta={
+                        item.estimatedPrice > 0
+                          ? `perkiraan ${formatRupiah(item.estimatedSubtotal)}`
+                          : "harga menyesuaikan total yang dibayar"
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="done-note">Catatan (opsional)</Label>

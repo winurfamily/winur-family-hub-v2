@@ -17,6 +17,8 @@ export interface TotalItem {
   name: string;
   qty: number;
   price: number;
+  /** Satuan ikut dibawa apa adanya — penyelarasan hanya menyentuh harga. */
+  unit?: string;
 }
 
 /** Jumlah subtotal (qty × harga) yang dibulatkan per baris. */

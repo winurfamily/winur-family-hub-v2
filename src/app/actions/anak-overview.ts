@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/server/admin-helpers";
-import { todayISODate } from "@/lib/format";
+import { todayISODate, toLocalISODate } from "@/lib/format";
 import { getWeekRange } from "@/lib/dunia-anak";
 import type { TaskStatus, TaskType, InvestmentStatus, TugasQuestion } from "@/lib/supabase/types";
 
@@ -56,7 +56,7 @@ export async function computeWeeklyStreak(
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    const iso = d.toISOString().slice(0, 10);
+    const iso = toLocalISODate(d);
     const statuses = days.get(iso) ?? [];
     const complete = statuses.length > 0 && statuses.every((s) => s === "approved");
     if (complete) daysComplete += 1;

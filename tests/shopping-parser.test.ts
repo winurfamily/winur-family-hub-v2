@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseShoppingList, parseShoppingLine } from "@/lib/shopping-parser";
 import { distributeTotal, sumItems } from "@/lib/shopping-total";
+import { formatQtyValue, formatUnitQty, itemKey, normalizeUnit } from "@/lib/shopping-item";
 
 describe("tempel daftar belanja (pemisah koma)", () => {
   it("memecah contoh dari pengguna menjadi lima barang dengan jumlah & satuan", () => {
@@ -60,8 +61,98 @@ describe("tempel daftar belanja (pemisah koma)", () => {
   });
 
   it("membatasi jumlah barang agar tempelan raksasa tidak membanjiri rencana", () => {
-    const text = Array.from({ length: 150 }, (_, i) => `Barang ${i + 1}`).join(", ");
+    // Nama sengaja tanpa angka di ujung: "Barang 7" akan terbaca sebagai
+    // barang "Barang" berjumlah 7, dan semuanya menyatu jadi satu baris.
+    const text = Array.from({ length: 150 }, (_, i) => `Barang ke-${i + 1}`).join(", ");
     expect(parseShoppingList(text)).toHaveLength(100);
+  });
+});
+
+describe("tempel daftar gaya berpipa (Nama | qty | satuan)", () => {
+  it("membaca contoh format berpipa dari petunjuk di layar", () => {
+    const items = parseShoppingList("Beras | 5 | kg, Minyak Goreng | 2 | liter, Telur | 1 | kg");
+
+    expect(items).toEqual([
+      { name: "Beras", qty: 5, unit: "kg", price: 0 },
+      { name: "Minyak Goreng", qty: 2, unit: "liter", price: 0 },
+      { name: "Telur", qty: 1, unit: "kg", price: 0 },
+    ]);
+  });
+
+  it("menerima kolom yang tidak lengkap tanpa menggagalkan barisnya", () => {
+    expect(parseShoppingLine("Beras | 5")).toEqual({ name: "Beras", qty: 5, unit: "", price: 0 });
+    expect(parseShoppingLine("Sabun mandi |")).toEqual({
+      name: "Sabun mandi",
+      qty: 1,
+      unit: "",
+      price: 0,
+    });
+  });
+
+  it("membaca kolom keempat sebagai harga satuan", () => {
+    expect(parseShoppingLine("Beras | 5 | kg | 12000")).toEqual({
+      name: "Beras",
+      qty: 5,
+      unit: "kg",
+      price: 12000,
+    });
+    expect(parseShoppingLine("Beras | 5 | kg | Rp12.000")).toMatchObject({ price: 12000 });
+  });
+
+  it("tidak mengupas angka dari nama barang pada gaya berpipa", () => {
+    // "Minyak Goreng 2 L" memang nama produknya; jumlahnya ada di kolom sendiri.
+    expect(parseShoppingLine("Minyak Goreng 2 L | 1 | pcs")).toEqual({
+      name: "Minyak Goreng 2 L",
+      qty: 1,
+      unit: "pcs",
+      price: 0,
+    });
+  });
+
+  it("membiarkan kedua gaya bercampur dalam satu tempelan, termasuk per baris", () => {
+    const items = parseShoppingList("Beras | 5 | kg\nMinyak goreng 2 liter, Telur");
+    expect(items).toEqual([
+      { name: "Beras", qty: 5, unit: "kg", price: 0 },
+      { name: "Minyak goreng", qty: 2, unit: "liter", price: 0 },
+      { name: "Telur", qty: 1, unit: "", price: 0 },
+    ]);
+  });
+
+  it("menggabungkan barang kembar dalam satu tempelan alih-alih menggandakannya", () => {
+    const items = parseShoppingList("Beras 5 kg, beras 2 kg, Telur 1 kg");
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toEqual({ name: "Beras", qty: 7, unit: "kg", price: 0 });
+  });
+
+  it("tetap membedakan barang bernama sama dengan satuan berbeda", () => {
+    const items = parseShoppingList("Susu 2 kotak, Susu 1 liter");
+    expect(items).toHaveLength(2);
+  });
+});
+
+describe("penulisan nama, qty, dan satuan", () => {
+  it("menulis kuantitas dengan koma desimal ala Indonesia", () => {
+    expect(formatQtyValue(5)).toBe("5");
+    expect(formatQtyValue(1.5)).toBe("1,5");
+  });
+
+  it("selalu memberi konteks pada angka kuantitas", () => {
+    expect(formatUnitQty(5, "kg")).toBe("5 kg");
+    expect(formatUnitQty(1, "pcs")).toBe("1 pcs");
+    // Tanpa satuan: tanda kali, bukan angka telanjang dan bukan satuan karangan.
+    expect(formatUnitQty(3, "")).toBe("3×");
+    expect(formatUnitQty(3, null)).toBe("3×");
+  });
+
+  it("menyeragamkan satuan yang diketik pengguna", () => {
+    expect(normalizeUnit("  KG ")).toBe("kg");
+    expect(normalizeUnit(null)).toBe("");
+  });
+
+  it("menganggap nama yang sama dengan huruf berbeda sebagai barang yang sama", () => {
+    expect(itemKey("Beras", "kg")).toBe(itemKey("  beras ", "KG"));
+    expect(itemKey("Beras", "kg")).not.toBe(itemKey("Beras", "liter"));
   });
 });
 

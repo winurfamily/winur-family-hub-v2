@@ -2,11 +2,14 @@
 
 import { requireFinanceSession } from "@/lib/server/finance-helpers";
 import { todayISODate } from "@/lib/format";
+import { normalizeItemName, normalizeUnit } from "@/lib/shopping-item";
 
 export interface ScannedItem {
   name: string;
   qty: number;
   price: number;
+  /** Satuan bila tertulis di struk ("kg", "pcs"). Kosong bila tidak ada. */
+  unit: string;
 }
 
 export interface ScanReceiptResult {
@@ -20,9 +23,11 @@ export interface ScanReceiptResult {
 
 const PROMPT =
   'Kamu membaca foto struk belanja Indonesia. Kembalikan HANYA JSON dengan format: ' +
-  '{"storeName": string, "date": "YYYY-MM-DD", "items": [{"name": string, "qty": number, "price": number}], "total": number}. ' +
+  '{"storeName": string, "date": "YYYY-MM-DD", "items": [{"name": string, "qty": number, "unit": string, "price": number}], "total": number}. ' +
   '"price" adalah HARGA SATUAN dalam Rupiah sebagai angka murni (tanpa titik, koma, atau simbol). ' +
-  '"qty" adalah kuantitas barang. Jika tanggal tidak terbaca, kosongkan field date.';
+  '"qty" adalah kuantitas barang. "unit" adalah satuannya bila tertulis di struk ' +
+  '(mis. "kg", "gram", "liter", "pcs", "bungkus"); kosongkan bila tidak tertulis. ' +
+  'Jika tanggal tidak terbaca, kosongkan field date.';
 
 /**
  * Baca struk dengan GPT-4o Vision.
@@ -73,7 +78,7 @@ export async function scanReceipt(imageDataUrl: string): Promise<ScanReceiptResu
       storeName?: string;
       date?: string;
       total?: number;
-      items?: { name?: string; qty?: number; price?: number }[];
+      items?: { name?: string; qty?: number; price?: number; unit?: string }[];
     };
 
     // Nilai dari model tidak pernah dipercaya apa adanya: setiap angka
@@ -81,8 +86,9 @@ export async function scanReceipt(imageDataUrl: string): Promise<ScanReceiptResu
     const items: ScannedItem[] = Array.isArray(parsed.items)
       ? parsed.items
           .map((i) => ({
-            name: String(i?.name ?? "").trim().slice(0, 80) || "Item",
+            name: normalizeItemName(i?.name) || "Item",
             qty: Number.isFinite(Number(i?.qty)) && Number(i?.qty) > 0 ? Number(i?.qty) : 1,
+            unit: normalizeUnit(i?.unit),
             price: Math.max(0, Math.round(Number(i?.price) || 0)),
           }))
           .slice(0, 100)

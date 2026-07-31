@@ -9,22 +9,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CurrencyInput, QtyInput } from "@/components/finance/currency-input";
+import {
+  ItemFieldsRow,
+  UnitDatalist,
+  parseQty,
+  type ItemDraft,
+} from "@/components/finance/item-fields";
 import { ReceiptUploader, type AttachedReceipt } from "./receipt-uploader";
 import { createShoppingTransaction, type ShoppingItemInput } from "@/app/actions/belanja";
 import { searchProducts, type PocketSummary, type ProductSuggestion } from "@/app/actions/keuangan";
 import { EXPENSE_CATEGORY_LABELS, type ShoppingTransactionSource } from "@/lib/supabase/types";
-import { formatRupiah, todayISODate } from "@/lib/format";
+import { formatRupiah } from "@/lib/format";
+import { MAX_ITEM_NAME_LENGTH, formatQtyValue } from "@/lib/shopping-item";
+import { useTodayJakarta } from "@/lib/use-today";
 
-interface DraftItem extends ShoppingItemInput {
-  key: string;
-}
-
-function newItem(partial?: Partial<ShoppingItemInput>): DraftItem {
+function newItem(partial?: Partial<ShoppingItemInput>): ItemDraft {
   return {
     key: crypto.randomUUID(),
     name: partial?.name ?? "",
-    qty: partial?.qty ?? 1,
+    qty: formatQtyValue(partial?.qty ?? 1),
+    unit: partial?.unit ?? "",
     price: partial?.price ?? 0,
   };
 }
@@ -64,21 +68,31 @@ export function ShoppingForm({
   const [isPending, startTransition] = useTransition();
   const tokenRef = useRef<string | null>(null);
 
+  const today = useTodayJakarta();
+
   const [merchant, setMerchant] = useState(defaults?.merchant ?? "");
-  const [date, setDate] = useState(defaults?.date ?? todayISODate());
+  const [date, setDate] = useState(defaults?.date ?? today);
+  const [dateTouched, setDateTouched] = useState(Boolean(defaults?.date));
   const [sourceValue, setSourceValue] = useState("main");
   const [note, setNote] = useState("");
   const [receipt, setReceipt] = useState<AttachedReceipt | null>(initialReceipt);
-  const [items, setItems] = useState<DraftItem[]>(
+  const [items, setItems] = useState<ItemDraft[]>(
     defaults?.items?.length ? defaults.items.map((i) => newItem(i)) : [newItem()]
   );
   const [error, setError] = useState<string | null>(null);
 
-  const total = items.reduce((acc, i) => acc + Math.round(i.qty * i.price), 0);
+  // Tab Manual tidak pernah ditutup-buka seperti panel, jadi tanggalnya
+  // disegarkan sendiri saat aplikasi kembali dibuka — kecuali sudah diganti.
+  useEffect(() => {
+    if (dateTouched) return;
+    setDate(today);
+  }, [today, dateTouched]);
+
+  const total = items.reduce((acc, i) => acc + Math.round(parseQty(i.qty) * i.price), 0);
   const available = sourceValue === "main" ? saldoUtama : pockets.find((p) => p.id === sourceValue)?.balance ?? 0;
   const insufficient = total > available;
 
-  const updateItem = (key: string, patch: Partial<ShoppingItemInput>) =>
+  const updateItem = (key: string, patch: Partial<ItemDraft>) =>
     setItems((current) => current.map((i) => (i.key === key ? { ...i, ...patch } : i)));
 
   const removeItem = (key: string) =>
@@ -89,7 +103,7 @@ export function ShoppingForm({
     if (isPending) return; // cegah tersimpan dua kali saat tombol ditekan berulang
 
     const cleaned = items
-      .map((i) => ({ name: i.name.trim(), qty: i.qty, price: i.price }))
+      .map((i) => ({ name: i.name.trim(), qty: parseQty(i.qty), unit: i.unit, price: i.price }))
       .filter((i) => i.name.length > 0);
 
     if (!merchant.trim()) return setError("Nama toko wajib diisi.");
@@ -132,6 +146,7 @@ export function ShoppingForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <UnitDatalist />
       <section className="space-y-3.5 rounded-[20px] bg-card p-4 shadow-card sm:p-5">
         <h2 className="flex items-center gap-2 font-heading text-base font-black text-ink-1">
           <ShoppingCart className="h-4 w-4 text-primary" aria-hidden /> Detail Transaksi
@@ -158,7 +173,10 @@ export function ShoppingForm({
               id="shop-date"
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                setDate(e.target.value);
+                setDateTouched(true);
+              }}
               disabled={isPending}
               required
             />
@@ -272,9 +290,10 @@ export function ShoppingForm({
 /**
  * Satu baris barang.
  *
- * Di HP tersusun vertikal (nama selebar penuh, lalu qty dan harga sebaris),
- * bukan diperas ke satu baris seperti sebelumnya — itu yang membuat kolom
- * harga terpotong di layar sempit.
+ * Di HP tersusun vertikal (nama selebar penuh, lalu jumlah · satuan · harga
+ * sebaris), bukan diperas ke satu baris seperti sebelumnya — itu yang membuat
+ * kolom harga terpotong di layar sempit. Susunan tiga kolomnya sama persis
+ * dengan pratinjau Tempel Daftar dan barang tambahan.
  */
 function ItemRow({
   item,
@@ -284,11 +303,11 @@ function ItemRow({
   onChange,
   onRemove,
 }: {
-  item: DraftItem;
+  item: ItemDraft;
   index: number;
   disabled?: boolean;
   canRemove: boolean;
-  onChange: (patch: Partial<ShoppingItemInput>) => void;
+  onChange: (patch: Partial<ItemDraft>) => void;
   onRemove: () => void;
 }) {
   const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([]);
@@ -305,7 +324,7 @@ function ItemRow({
     return () => clearTimeout(timer);
   }, [item.name, showSuggestions]);
 
-  const subtotal = Math.round(item.qty * item.price);
+  const subtotal = Math.round(parseQty(item.qty) * item.price);
 
   return (
     <li className="rounded-2xl border-2 border-border bg-surface-2 p-3">
@@ -335,9 +354,9 @@ function ItemRow({
             onChange={(e) => onChange({ name: e.target.value })}
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-            maxLength={80}
+            maxLength={MAX_ITEM_NAME_LENGTH}
             autoComplete="off"
-            placeholder="Contoh: Beras 5kg"
+            placeholder="Contoh: Beras Premium"
             disabled={disabled}
           />
           {showSuggestions && suggestions.length > 0 && (
@@ -364,23 +383,7 @@ function ItemRow({
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="space-y-1.5">
-            <Label className="text-[11px]">Kuantitas</Label>
-            <QtyInput value={item.qty} onValueChange={(qty) => onChange({ qty })} disabled={disabled} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`item-price-${item.key}`} className="text-[11px]">
-              Harga satuan
-            </Label>
-            <CurrencyInput
-              id={`item-price-${item.key}`}
-              value={item.price}
-              onValueChange={(price) => onChange({ price })}
-              disabled={disabled}
-            />
-          </div>
-        </div>
+        <ItemFieldsRow index={index} draft={item} disabled={disabled} onPatch={onChange} />
 
         <p className="flex items-baseline justify-between border-t border-border pt-2 text-xs">
           <span className="font-bold text-ink-3">Subtotal</span>

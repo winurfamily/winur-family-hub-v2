@@ -4,10 +4,12 @@ import { useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronLeft, Minus, Plus, Trash2, Undo2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, Minus, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Panel, ProgressBar, EmptyState } from "@/components/finance/ui";
+import { ItemLine } from "@/components/finance/item-line";
 import { PasteListSheet } from "../../_components/paste-list-sheet";
+import { ItemEditSheet } from "./item-edit-sheet";
 import { CompleteSheet } from "./complete-sheet";
 import {
   addPlanItem,
@@ -20,6 +22,8 @@ import {
 import type { FinanceSummary } from "@/app/actions/keuangan";
 import type { ShoppingPlanItemStatus } from "@/lib/supabase/types";
 import { formatDate, formatRupiah } from "@/lib/format";
+import { formatQtyValue } from "@/lib/shopping-item";
+import { parseShoppingLine } from "@/lib/shopping-parser";
 import { cn } from "@/lib/utils";
 
 type Filter = "semua" | "belum" | "sudah";
@@ -145,7 +149,7 @@ export function ChecklistView({
 
           {!locked && (
             <div className="mt-3">
-              <PasteListSheet planId={plan.id} />
+              <PasteListSheet planId={plan.id} existingItems={items} />
             </div>
           )}
 
@@ -260,7 +264,18 @@ export function ChecklistView({
   );
 }
 
-/** Satu baris ringkas — tinggi minimum 56px, kotak centang mudah ditekan. */
+/**
+ * Satu baris ringkas.
+ *
+ * Yang terbaca lebih dulu adalah NAMA barang; jumlah & satuannya duduk sebagai
+ * lencana "5 kg" di ujung kanan nama — bukan angka kecil di baris kedua yang
+ * mengambang tanpa konteks. Kotak centang 48px tetap di kiri karena itulah
+ * satu-satunya tombol yang ditekan berulang kali sambil mendorong troli.
+ *
+ * Ubah, batalkan, dan hapus SENGAJA tidak ikut tampil di baris: ketiganya
+ * jarang dipakai dan hanya mempersempit ruang nama. Menekan barisnya membuka
+ * laci berisi pengatur jumlah dan ketiga aksi itu.
+ */
 function ChecklistRow({
   item,
   locked,
@@ -280,11 +295,19 @@ function ChecklistRow({
   const done = item.status === "bought";
   const cancelled = item.status === "cancelled";
 
+  const meta = [
+    item.estimatedPrice > 0 ? `${formatRupiah(item.estimatedPrice)} / satuan` : null,
+    item.estimatedPrice > 0 ? formatRupiah(item.estimatedSubtotal) : null,
+    cancelled ? "tidak jadi dibeli" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     // scroll-mt menjaga baris tidak berhenti tepat di bawah header yang
     // menempel ketika digulir ke posisinya.
     <li className="scroll-mt-[76px]">
-      <div className="flex items-center gap-2 py-1">
+      <div className="flex items-center gap-2 py-1.5">
         <button
           type="button"
           disabled={locked || cancelled}
@@ -308,92 +331,137 @@ function ChecklistRow({
           type="button"
           onClick={() => setExpanded((value) => !value)}
           aria-expanded={expanded}
-          className="min-w-0 flex-1 rounded-xl py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`Pilihan untuk ${item.name}`}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl py-1.5 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <p
+          <ItemLine
+            className="flex-1"
+            name={item.name}
+            qty={item.qty}
+            unit={item.unit}
+            meta={meta || undefined}
+            state={done ? "done" : cancelled ? "cancelled" : "default"}
+          />
+          <ChevronDown
+            aria-hidden
             className={cn(
-              "truncate text-[15px] font-bold transition-colors duration-200",
-              done && "text-ink-3 line-through",
-              cancelled && "text-ink-3 line-through opacity-60"
+              "h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200",
+              expanded && "rotate-180"
             )}
-          >
-            {item.name}
-          </p>
-          <p className="tabular truncate text-[11px] font-semibold text-ink-3">
-            {formatQty(item.qty)}
-            {item.unit ? ` ${item.unit}` : ""}
-            {item.estimatedPrice > 0 && ` · ${formatRupiah(item.estimatedPrice)}`}
-            {cancelled && " · tidak jadi dibeli"}
-          </p>
-        </button>
-
-        <button
-          type="button"
-          disabled={locked}
-          onClick={onCancel}
-          aria-label={cancelled ? `Kembalikan ${item.name}` : `Tandai ${item.name} tidak jadi dibeli`}
-          className="tap-target grid shrink-0 place-items-center rounded-xl text-ink-3 transition-all duration-150 active:scale-90 active:bg-surface-2 disabled:opacity-40"
-        >
-          {cancelled ? <Undo2 className="h-5 w-5" aria-hidden /> : <X className="h-5 w-5" aria-hidden />}
+          />
         </button>
       </div>
 
-      {expanded && !locked && (
-        <div className="flex items-center gap-2 pb-3 pl-14 pr-1">
-          <span className="text-[11px] font-black uppercase text-ink-3">Jumlah</span>
-          <div className="flex items-center gap-1">
+      {expanded && (
+        <div className="flex flex-wrap items-center gap-2 pb-3 pl-14 pr-1">
+          {!locked && (
+            <div className="flex items-center gap-1 rounded-xl bg-surface-2 p-1">
+              <button
+                type="button"
+                onClick={() => onQty(-1)}
+                aria-label={`Kurangi jumlah ${item.name}`}
+                className="grid h-9 w-9 place-items-center rounded-lg bg-card text-ink-2 shadow-sm transition-transform duration-150 active:scale-90"
+              >
+                <Minus className="h-4 w-4" aria-hidden />
+              </button>
+              <span className="tabular min-w-[3rem] text-center text-sm font-black text-ink-1">
+                {formatQtyValue(item.qty)}
+                {item.unit ? <span className="text-[11px] text-ink-3"> {item.unit}</span> : null}
+              </span>
+              <button
+                type="button"
+                onClick={() => onQty(1)}
+                aria-label={`Tambah jumlah ${item.name}`}
+                className="grid h-9 w-9 place-items-center rounded-lg bg-card text-ink-2 shadow-sm transition-transform duration-150 active:scale-90"
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+          )}
+
+          {!locked && (
+            <ItemEditSheet
+              item={item}
+              trigger={
+                <button
+                  type="button"
+                  className="tap-target flex items-center gap-1 rounded-xl border-2 border-border bg-card px-3 text-xs font-black text-ink-2 transition-transform duration-150 active:scale-95"
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden /> Ubah
+                </button>
+              }
+            />
+          )}
+
+          {!locked && (
             <button
               type="button"
-              onClick={() => onQty(-1)}
-              aria-label={`Kurangi jumlah ${item.name}`}
-              className="tap-target grid place-items-center rounded-xl border-2 border-border bg-card text-ink-2 transition-transform duration-150 active:scale-90 active:bg-surface-2"
+              onClick={onCancel}
+              className="tap-target flex items-center gap-1 rounded-xl border-2 border-border bg-card px-3 text-xs font-black text-ink-2 transition-transform duration-150 active:scale-95"
             >
-              <Minus className="h-4 w-4" aria-hidden />
+              {cancelled ? (
+                <>
+                  <Undo2 className="h-3.5 w-3.5" aria-hidden /> Kembalikan
+                </>
+              ) : (
+                <>
+                  <X className="h-3.5 w-3.5" aria-hidden /> Tidak jadi
+                </>
+              )}
             </button>
-            <span className="tabular w-12 text-center text-sm font-black text-ink-1">
-              {formatQty(item.qty)}
-            </span>
+          )}
+
+          {!locked && (
             <button
               type="button"
-              onClick={() => onQty(1)}
-              aria-label={`Tambah jumlah ${item.name}`}
-              className="tap-target grid place-items-center rounded-xl border-2 border-border bg-card text-ink-2 transition-transform duration-150 active:scale-90 active:bg-surface-2"
+              onClick={onDelete}
+              aria-label={`Hapus ${item.name} dari daftar`}
+              className="tap-target ml-auto grid place-items-center rounded-xl text-destructive transition-transform duration-150 active:scale-90 active:bg-destructive/10"
             >
-              <Plus className="h-4 w-4" aria-hidden />
+              <Trash2 className="h-4 w-4" aria-hidden />
             </button>
-          </div>
-          <button
-            type="button"
-            onClick={onDelete}
-            aria-label={`Hapus ${item.name} dari daftar`}
-            className="tap-target ml-auto grid place-items-center rounded-xl text-destructive transition-transform duration-150 active:scale-90 active:bg-destructive/10"
-          >
-            <Trash2 className="h-4 w-4" aria-hidden />
-          </button>
+          )}
+
+          {locked && (
+            <p className="text-[11px] font-semibold text-ink-3">
+              Rencana sudah diselesaikan — barang tidak bisa diubah lagi.
+            </p>
+          )}
         </div>
       )}
     </li>
   );
 }
 
-/** Tambah barang mendadak saat sudah berada di toko. */
+/**
+ * Tambah barang mendadak saat sudah berada di toko.
+ *
+ * Satu kolom saja supaya tetap bisa dipakai satu tangan, tetapi isinya
+ * dibaca dengan pengurai yang sama dengan Tempel Daftar: mengetik
+ * "Minyak goreng 2 liter" langsung menjadi nama + jumlah + satuan.
+ */
 function QuickAddForm({ planId }: { planId: string }) {
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [text, setText] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    const value = name.trim();
-    if (!value || isPending) return;
+    const parsed = parseShoppingLine(text);
+    if (!parsed || isPending) return;
 
     startTransition(async () => {
-      const result = await addPlanItem(planId, { name: value, qty: 1, estimatedPrice: 0 });
+      const result = await addPlanItem(planId, {
+        name: parsed.name,
+        qty: parsed.qty,
+        unit: parsed.unit,
+        estimatedPrice: parsed.price,
+      });
       if (!result.success) {
         toast.error(result.error ?? "Gagal menambah barang.");
         return;
       }
-      setName("");
+      setText("");
       router.refresh();
     });
   };
@@ -401,18 +469,18 @@ function QuickAddForm({ planId }: { planId: string }) {
   return (
     <form onSubmit={submit} className="flex min-w-0 flex-1 gap-1.5">
       <Input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        maxLength={80}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        maxLength={100}
         autoComplete="off"
-        placeholder="Barang mendadak…"
-        aria-label="Nama barang baru"
+        placeholder="Mis. Telur 1 kg"
+        aria-label="Barang baru — nama, jumlah, dan satuan"
         disabled={isPending}
         className="min-w-0"
       />
       <button
         type="submit"
-        disabled={isPending || !name.trim()}
+        disabled={isPending || !text.trim()}
         aria-label="Tambah barang"
         className="tap-target grid shrink-0 place-items-center rounded-xl bg-secondary text-white transition-transform duration-150 active:scale-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
@@ -420,8 +488,4 @@ function QuickAddForm({ planId }: { planId: string }) {
       </button>
     </form>
   );
-}
-
-function formatQty(qty: number): string {
-  return Number.isInteger(qty) ? String(qty) : qty.toFixed(2).replace(/\.?0+$/, "");
 }

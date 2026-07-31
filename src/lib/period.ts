@@ -6,10 +6,17 @@
  * daftar serta label periodenya.
  */
 
-/** Format "YYYY-MM" untuk bulan berjalan (waktu lokal). */
+import { currentMonthISO, todayISODate } from "@/lib/format";
+
+/**
+ * Format "YYYY-MM" untuk bulan berjalan menurut waktu Indonesia.
+ *
+ * Sebelumnya memakai `new Date()` lokal: di server Vercel (UTC) tanggal 1
+ * Agustus pukul 00:30 WIB masih 31 Juli, sehingga seluruh laporan & riwayat
+ * membuka bulan yang salah selama tujuh jam pertama setiap awal bulan.
+ */
 export function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return currentMonthISO();
 }
 
 /** Rentang tanggal awal-akhir bulan dari format "YYYY-MM". */
@@ -32,6 +39,27 @@ export function shiftMonth(month: string, delta: number): string {
 /** Daftar `count` bulan terakhir, terlama lebih dulu. */
 export function lastMonths(count: number, endMonth = currentMonth()): string[] {
   return Array.from({ length: count }, (_, i) => shiftMonth(endMonth, i - (count - 1)));
+}
+
+/**
+ * Bulan berikutnya ("YYYY-MM") dihitung dari HARI INI versi Indonesia — bukan
+ * dari bulan rencana sumber, supaya tombol "Rencana Bulan Depan" selalu
+ * berarti bulan depan yang sebenarnya, kapan pun ia ditekan.
+ */
+export function nextMonth(today = todayISODate()): string {
+  return shiftMonth(today.slice(0, 7), 1);
+}
+
+/**
+ * Tanggal default rencana bulan depan: hari yang sama dengan belanja sumber,
+ * dijepit ke jumlah hari bulan tujuan (31 Januari → 28/29 Februari).
+ */
+export function nextMonthDate(sourceDate?: string | null, today = todayISODate()): string {
+  const month = nextMonth(today);
+  const [year, mon] = month.split("-").map(Number);
+  const lastDay = new Date(year, mon, 0).getDate();
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(sourceDate ?? "") ? Number(sourceDate!.slice(8, 10)) : 1;
+  return `${month}-${String(Math.min(Math.max(day, 1), lastDay)).padStart(2, "0")}`;
 }
 
 export const PERIOD_KEYS = ["this_month", "last_month", "3m", "6m", "ytd"] as const;

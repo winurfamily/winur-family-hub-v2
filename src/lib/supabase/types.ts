@@ -448,6 +448,8 @@ export type ShoppingTransactionItemRow = {
   qty: number;
   price: number;
   subtotal: number;
+  /** Satuan barang (migration 0024). Null pada baris lama & sebelum migrasi. */
+  unit: string | null;
   position: number;
   created_at: string;
 };
@@ -685,7 +687,7 @@ export interface Database {
       >;
       shopping_transaction_items: Helper<
         ShoppingTransactionItemRow,
-        "id" | "product_id" | "qty" | "price" | "subtotal" | "position" | "created_at"
+        "id" | "product_id" | "qty" | "price" | "subtotal" | "unit" | "position" | "created_at"
       >;
       receipt_attachments: Helper<
         ReceiptAttachmentRow,

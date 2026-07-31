@@ -13,6 +13,8 @@ import {
 } from "@/lib/server/finance-helpers";
 import { createShoppingTransaction } from "@/app/actions/belanja";
 import { distributeTotal } from "@/lib/shopping-total";
+import { MAX_ITEM_NAME_LENGTH, normalizeItemName, normalizeUnit } from "@/lib/shopping-item";
+import { formatMonthLabel } from "@/lib/format";
 import type { ShoppingPlanStatus, ShoppingPlanItemStatus } from "@/lib/supabase/types";
 
 // ---------------------------------------------------------------------------
@@ -625,6 +627,231 @@ export async function deletePlanItem(itemId: string): Promise<ActionResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Rekomendasi rencana bulan berikutnya
+// ---------------------------------------------------------------------------
+
+export interface PlanTemplateItem {
+  name: string;
+  qty: number;
+  unit: string;
+  estimatedPrice: number;
+}
+
+export interface ShoppingSource {
+  id: string;
+  kind: "transaction";
+  label: string;
+  /** "YYYY-MM-DD" tanggal belanja. */
+  date: string;
+  total: number;
+  itemCount: number;
+}
+
+/**
+ * Transaksi belanja yang layak dijadikan sumber rekomendasi.
+ *
+ * Rencana yang sudah ada TIDAK ikut di sini: halaman Belanja sudah memegang
+ * seluruh rencana beserta barangnya lewat props, jadi memakainya sebagai
+ * sumber tidak memerlukan query sama sekali. Dua query di bawah hanya berjalan
+ * sekali, saat panel rekomendasi dibuka.
+ */
+export async function getShoppingSources(limit = 12): Promise<ShoppingSource[]> {
+  const session = await requireFinanceSession();
+  if (!session) return [];
+
+  const supabase = createAdminClient();
+  // HANYA kategori belanja. Pengeluaran umum dari Keuangan (listrik, sekolah)
+  // menumpang tabel yang sama, dan menawarkannya sebagai "daftar barang bulan
+  // lalu" hanya akan membingungkan.
+  const { data: rows } = await supabase
+    .from("shopping_transactions")
+    .select("id, merchant, name, date, total")
+    .eq("family_id", session.familyId)
+    .eq("category", "belanja")
+    .order("date", { ascending: false })
+    .limit(limit);
+
+  const transactions = rows ?? [];
+  if (transactions.length === 0) return [];
+
+  const { data: itemRows } = await supabase
+    .from("shopping_transaction_items")
+    .select("transaction_id")
+    .in(
+      "transaction_id",
+      transactions.map((t) => t.id)
+    );
+
+  const counts = new Map<string, number>();
+  for (const row of itemRows ?? []) {
+    counts.set(row.transaction_id, (counts.get(row.transaction_id) ?? 0) + 1);
+  }
+
+  return transactions.map((t) => ({
+    id: t.id,
+    kind: "transaction" as const,
+    label: t.merchant ?? t.name ?? "Belanja",
+    date: t.date,
+    total: Number(t.total),
+    itemCount: counts.get(t.id) ?? 0,
+  }));
+}
+
+/** Barang satu transaksi belanja, sudah berbentuk usulan item rencana. */
+export async function getSourceItems(transactionId: string): Promise<PlanTemplateItem[]> {
+  const session = await requireFinanceSession();
+  if (!session || !isUuid(transactionId)) return [];
+
+  const supabase = createAdminClient();
+  const { data: owner } = await supabase
+    .from("shopping_transactions")
+    .select("id")
+    .eq("id", transactionId)
+    .eq("family_id", session.familyId)
+    .maybeSingle();
+
+  if (!owner) return [];
+
+  // `unit` baru ada setelah migration 0024; bila belum, ambil tanpa kolom itu.
+  const withUnit = await supabase
+    .from("shopping_transaction_items")
+    .select("name, qty, price, unit")
+    .eq("transaction_id", transactionId)
+    .order("position");
+
+  const rows = withUnit.error
+    ? (
+        await supabase
+          .from("shopping_transaction_items")
+          .select("name, qty, price")
+          .eq("transaction_id", transactionId)
+          .order("position")
+      ).data ?? []
+    : withUnit.data ?? [];
+
+  return (rows as { name: string; qty: number | string; price: number | string; unit?: string | null }[])
+    .map((row) => ({
+      name: normalizeItemName(row.name),
+      qty: Number(row.qty) > 0 ? Number(row.qty) : 1,
+      unit: normalizeUnit(row.unit),
+      estimatedPrice: Math.max(0, Math.round(Number(row.price) || 0)),
+    }))
+    .filter((item) => item.name.length > 0);
+}
+
+export interface CreatePlanFromTemplateInput {
+  name: string;
+  plannedDate?: string;
+  note?: string;
+  items: PlanTemplateItem[];
+  /** Label sumber rekomendasi, disimpan di catatan agar asal-usulnya jelas. */
+  sourceLabel?: string;
+  /** "YYYY-MM" periode asal. */
+  sourceMonth?: string;
+}
+
+/**
+ * Simpan draft rekomendasi menjadi satu rencana belanja baru.
+ *
+ * TIDAK membuat transaksi dan TIDAK menyentuh saldo — ini murni daftar
+ * rencana; uang baru berkurang lewat "Selesaikan Belanja".
+ *
+ * Penjaga rencana ganda: bila rencana dengan nama + tanggal yang sama sudah
+ * dibuat keluarga ini dalam 10 menit terakhir, id rencana itu yang
+ * dikembalikan alih-alih membuat rencana kedua. Itu menutup celah klik ganda
+ * dan pengiriman ulang setelah jaringan putus, tanpa perlu kolom token baru.
+ */
+export async function createPlanFromTemplate(
+  input: CreatePlanFromTemplateInput
+): Promise<ActionResult<{ id: string; added: number; reused: boolean }>> {
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+
+  const name = normalizeItemName(input.name).slice(0, 60);
+  if (!name) return { success: false, error: "Nama rencana wajib diisi." };
+
+  const plannedDate = /^\d{4}-\d{2}-\d{2}$/.test(input.plannedDate ?? "") ? input.plannedDate! : null;
+
+  const clean = (Array.isArray(input.items) ? input.items : [])
+    .map((raw) => ({
+      name: normalizeItemName(raw?.name),
+      qty: Number(raw?.qty) > 0 ? Number(raw.qty) : 1,
+      unit: normalizeUnit(raw?.unit),
+      price: Math.max(0, Math.round(Number(raw?.estimatedPrice) || 0)),
+    }))
+    .filter((item) => item.name.length > 0 && item.name.length <= MAX_ITEM_NAME_LENGTH)
+    .slice(0, 100);
+
+  if (clean.length === 0) return { success: false, error: "Tidak ada barang untuk disimpan." };
+
+  const supabase = createAdminClient();
+
+  const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: recent } = await supabase
+    .from("shopping_plans")
+    .select("id")
+    .eq("family_id", session.familyId)
+    .eq("name", name)
+    .gte("created_at", sinceIso)
+    .limit(1)
+    .maybeSingle();
+
+  if (recent) {
+    return { success: true, data: { id: recent.id, added: 0, reused: true } };
+  }
+
+  const noteParts = [input.note?.trim()].filter(Boolean) as string[];
+  if (input.sourceLabel) {
+    const period = input.sourceMonth ? ` (${formatMonthLabel(input.sourceMonth)})` : "";
+    noteParts.push(`Rekomendasi dari ${input.sourceLabel}${period}`);
+  }
+
+  const { data: plan, error } = await supabase
+    .from("shopping_plans")
+    .insert({
+      family_id: session.familyId,
+      name,
+      planned_date: plannedDate,
+      note: noteParts.join(" · ").slice(0, 200) || null,
+      status: "draft",
+      created_by: session.profileId,
+    })
+    .select("id")
+    .single();
+
+  if (error || !plan) return { success: false, error: "Gagal membuat rencana." };
+
+  const { error: itemError } = await supabase.from("shopping_plan_items").insert(
+    clean.map((item, index) => ({
+      plan_id: plan.id,
+      name: item.name,
+      qty: item.qty,
+      estimated_price: item.price,
+      note: item.unit || null,
+      position: index,
+      status: "pending" as const,
+      checked: false,
+    }))
+  );
+
+  if (itemError) {
+    // Rencana kosong lebih membingungkan daripada tidak ada rencana sama sekali.
+    await supabase.from("shopping_plans").delete().eq("id", plan.id);
+    return { success: false, error: "Gagal menyimpan daftar barang." };
+  }
+
+  await recalcPlanTotals(supabase, plan.id);
+  await logAudit(supabase, session.familyId, session.profileId, "shopping_plan", plan.id, "create_from_template", null, {
+    name,
+    items: clean.length,
+    source: input.sourceLabel ?? null,
+  });
+  revalidateKeuangan();
+
+  return { success: true, data: { id: plan.id, added: clean.length, reused: false } };
+}
+
+// ---------------------------------------------------------------------------
 // Ubah item rencana menjadi transaksi belanja
 // ---------------------------------------------------------------------------
 
@@ -643,6 +870,7 @@ export interface ExtraShoppingItemInput {
   name: string;
   qty: number;
   price?: number;
+  unit?: string;
 }
 
 export interface CompleteShoppingPlanInput {
@@ -692,7 +920,7 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
 
   const { data: rows } = await supabase
     .from("shopping_plan_items")
-    .select("id, name, qty, estimated_price, actual_price, status, transaction_id")
+    .select("id, name, qty, estimated_price, actual_price, status, note, transaction_id")
     .eq("plan_id", input.planId)
     .order("position");
 
@@ -706,9 +934,10 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
         name,
         qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
         price: Number.isFinite(price) && price >= 0 ? price : 0,
+        unit: normalizeUnit(raw?.unit),
       };
     })
-    .filter((item) => item.name.length > 0 && item.name.length <= 80);
+    .filter((item) => item.name.length > 0 && item.name.length <= MAX_ITEM_NAME_LENGTH);
 
   if (active.length === 0 && extras.length === 0) {
     return { success: false, error: "Tidak ada barang aktif untuk diselesaikan." };
@@ -724,6 +953,9 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
       name: item.name,
       qty: Number(item.qty),
       price: Number.isFinite(actual) && actual >= 0 ? actual : Number(item.estimated_price),
+      // Satuan checklist ikut ke transaksi, supaya detail transaksi menulis
+      // "5 kg" persis seperti barisnya di checklist.
+      unit: normalizeUnit(item.note),
     };
   });
 

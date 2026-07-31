@@ -1,4 +1,5 @@
 import "server-only";
+import { toLocalISODate } from "@/lib/format";
 
 /** XP dibutuhkan untuk naik dari `level` ke `level + 1`. Formula: round(20 * 1.4^(level-1)) */
 export function xpForLevel(level: number): number {
@@ -41,8 +42,10 @@ export function getWeekRange(dateStr: string): { weekStart: string; weekEnd: str
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
-  const toISO = (d: Date) => d.toISOString().slice(0, 10);
-  return { weekStart: toISO(monday), weekEnd: toISO(sunday) };
+  // Dibaca lewat komponen tanggal lokal, bukan toISOString(): `date` di atas
+  // dibuat dari tengah malam LOKAL, jadi mengubahnya ke UTC memundurkannya
+  // sehari di zona waktu Indonesia dan menggeser seluruh minggu tugas anak.
+  return { weekStart: toLocalISODate(monday), weekEnd: toLocalISODate(sunday) };
 }
 
 export function isSunday(dateStr: string): boolean {

@@ -5,8 +5,9 @@ import { getShoppingTransaction } from "@/app/actions/belanja";
 import { GameButton } from "@/components/ui/game-button";
 import { ReceiptViewer } from "../../_components/receipt-viewer";
 import { DeleteTransactionButton } from "../../_components/delete-transaction-button";
+import { ItemLine } from "@/components/finance/item-line";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/supabase/types";
-import { formatRupiah, formatDate, formatDateTime, formatNumber } from "@/lib/format";
+import { formatRupiah, formatDate, formatDateTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -62,16 +63,20 @@ export default async function BelanjaDetailPage({ params }: { params: { id: stri
         </h2>
         <ul className="divide-y divide-border">
           {trx.items.map((item) => (
-            <li key={item.id} className="flex items-start gap-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <p className="break-words text-[13px] font-extrabold text-ink-1">{item.name}</p>
-                <p className="tabular text-[11px] font-semibold text-ink-3">
-                  {formatNumber(item.qty)} × {formatRupiah(item.price)}
-                </p>
-              </div>
-              <p className="tabular shrink-0 text-[13px] font-extrabold text-ink-1">
-                {formatRupiah(item.subtotal)}
-              </p>
+            <li key={item.id} className="py-2.5">
+              {/* Bentuk yang sama dengan checklist & pratinjau tempel daftar:
+                  nama sebagai informasi utama, jumlah + satuan sebagai lencana. */}
+              <ItemLine
+                name={item.name}
+                qty={item.qty}
+                unit={item.unit}
+                meta={`${formatRupiah(item.price)} / satuan`}
+                trailing={
+                  <p className="tabular shrink-0 pl-2 text-[13px] font-extrabold text-ink-1">
+                    {formatRupiah(item.subtotal)}
+                  </p>
+                }
+              />
             </li>
           ))}
         </ul>

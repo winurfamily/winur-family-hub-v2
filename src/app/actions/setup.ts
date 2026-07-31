@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { completeSetupSchema, type CompleteSetupInput } from "@/lib/validation/setup";
 import { xpNeeded } from "@/lib/xp";
+import { todayISODate, toLocalISODate } from "@/lib/format";
 
 const BCRYPT_ROUNDS = 10;
 const PLACEHOLDER_AVATAR = "/avatars/placeholder.png";
@@ -14,7 +15,9 @@ export interface CompleteSetupResult {
 }
 
 function currentWeekRange(): { weekStart: string; weekEnd: string } {
-  const now = new Date();
+  // Berangkat dari "hari ini" versi Indonesia, bukan hari lokal server (UTC).
+  const [year, month, day0] = todayISODate().split("-").map(Number);
+  const now = new Date(year, month - 1, day0);
   const day = now.getDay(); // 0=Min, 1=Sen, ... 6=Sab
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = new Date(now);
@@ -22,8 +25,7 @@ function currentWeekRange(): { weekStart: string; weekEnd: string } {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
-  const toISODate = (d: Date) => d.toISOString().slice(0, 10);
-  return { weekStart: toISODate(monday), weekEnd: toISODate(sunday) };
+  return { weekStart: toLocalISODate(monday), weekEnd: toLocalISODate(sunday) };
 }
 
 /**

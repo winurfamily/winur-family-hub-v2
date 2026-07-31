@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { distributeTotal } from "@/lib/shopping-total";
 import { parseShoppingList } from "@/lib/shopping-parser";
+import { nextMonthDate } from "@/lib/period";
+import { normalizeUnit } from "@/lib/shopping-item";
 
 /**
  * Integrasi alur Belanja terhadap Supabase sungguhan.
@@ -356,6 +358,140 @@ d("Alur Belanja (integrasi Supabase)", () => {
     });
     expect(deleteError).toBeNull();
     expect(await mainBalance()).toBe(0);
+  });
+
+  it("membuat rencana bulan depan dari belanja sebelumnya TANPA menyentuh saldo", async () => {
+    await setMainBalance(1_000_000);
+
+    // --- Bulan lalu: satu belanja yang benar-benar terjadi ---------------
+    const lastMonthPlan = await createPlan("Belanja Juli");
+    await pasteIntoPlan(lastMonthPlan, "Beras 5 kg, Minyak goreng 2 liter, Telur 1 kg");
+    const sourceItems = await planItems(lastMonthPlan);
+
+    const HARGA_SATUAN = 20_000;
+    const belanjaItems = sourceItems.map((item) => ({
+      name: item.name,
+      qty: Number(item.qty),
+      price: HARGA_SATUAN,
+      // `unit` diabaikan tanpa error oleh RPC versi sebelum 0024.
+      unit: item.note ?? "",
+    }));
+    const totalBelanja = belanjaItems.reduce((acc, i) => acc + Math.round(i.qty * i.price), 0);
+
+    const { data: trxId, error: trxError } = await db.rpc("fin_create_shopping", {
+      p_family_id: familyId,
+      p_merchant: "Toko Bulanan",
+      p_date: TODAY,
+      p_pocket_id: null,
+      p_category: "belanja",
+      p_note: null,
+      p_source: "plan",
+      p_plan_id: lastMonthPlan,
+      p_items: belanjaItems,
+      p_created_by: actorId,
+      p_client_token: null,
+    });
+    expect(trxError).toBeNull();
+
+    const balanceAfterShopping = await mainBalance();
+    expect(balanceAfterShopping).toBe(1_000_000 - totalBelanja);
+
+    // --- Rekomendasi: salin rincian transaksi jadi draft bulan depan -----
+    const { data: rincian } = await db
+      .from("shopping_transaction_items")
+      .select("name, qty, price")
+      .eq("transaction_id", trxId as string)
+      .order("position");
+
+    const template = (rincian ?? []).map((row) => ({
+      name: row.name,
+      qty: Number(row.qty),
+      unit: normalizeUnit(sourceItems.find((i) => i.name === row.name)?.note),
+      estimatedPrice: Math.round(Number(row.price)),
+    }));
+    expect(template.length).toBe(3);
+
+    const plannedDate = nextMonthDate(TODAY, TODAY);
+    expect(plannedDate.slice(0, 7)).toBe("2026-09");
+
+    const { count: trxBefore } = await db
+      .from("shopping_transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", familyId);
+
+    const draftName = `Belanja September ${Date.now()}`;
+    const { data: draft, error: draftError } = await db
+      .from("shopping_plans")
+      .insert({
+        family_id: familyId,
+        name: draftName,
+        planned_date: plannedDate,
+        note: "Rekomendasi dari Toko Bulanan (Agustus 2026)",
+        status: "draft",
+        created_by: actorId,
+      })
+      .select("id")
+      .single();
+    expect(draftError).toBeNull();
+
+    await db.from("shopping_plan_items").insert(
+      template.map((item, index) => ({
+        plan_id: draft!.id,
+        name: item.name,
+        qty: item.qty,
+        estimated_price: item.estimatedPrice,
+        note: item.unit || null,
+        position: index,
+        status: "pending" as const,
+        checked: false,
+      }))
+    );
+
+    // Rencana adalah DAFTAR, bukan pengeluaran: saldo tidak boleh bergerak…
+    expect(await mainBalance()).toBe(balanceAfterShopping);
+    // …dan tidak ada transaksi baru yang lahir dari pembuatan rencana ini.
+    const { count: trxAfter } = await db
+      .from("shopping_transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", familyId);
+    expect(trxAfter).toBe(trxBefore);
+
+    // Qty, satuan, dan harga terakhir ikut tersalin sebagai rekomendasi.
+    const copied = await planItems(draft!.id);
+    expect(copied.map((i) => i.name)).toEqual(["Beras", "Minyak goreng", "Telur"]);
+    expect(copied[0].note).toBe("kg");
+    expect(Number(copied[0].qty)).toBe(5);
+    expect(Number(copied[0].estimated_price)).toBe(20_000);
+
+    // Draft masih bisa diedit sebelum dipakai.
+    await db.from("shopping_plan_items").update({ qty: 8 }).eq("id", copied[0].id);
+    await db.from("shopping_plan_items").delete().eq("id", copied[2].id);
+
+    const edited = await planItems(draft!.id);
+    expect(edited).toHaveLength(2);
+    expect(Number(edited[0].qty)).toBe(8);
+
+    // --- Penjaga rencana ganda ------------------------------------------
+    // Tombol ditekan dua kali: pencarian rencana bernama sama yang baru dibuat
+    // menemukan yang pertama, jadi tidak ada rencana kedua yang dibuat.
+    const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: recent } = await db
+      .from("shopping_plans")
+      .select("id")
+      .eq("family_id", familyId)
+      .eq("name", draftName)
+      .gte("created_at", since)
+      .limit(1)
+      .maybeSingle();
+
+    expect(recent?.id).toBe(draft!.id);
+
+    const { count: planCount } = await db
+      .from("shopping_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", familyId)
+      .eq("name", draftName);
+    expect(planCount).toBe(1);
   });
 
   it("menolak menyelesaikan rencana milik keluarga lain", async () => {

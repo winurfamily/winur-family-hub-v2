@@ -3,45 +3,72 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ClipboardPaste, Trash2 } from "lucide-react";
+import { ClipboardPaste, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { CurrencyInput } from "@/components/finance/currency-input";
 import {
   ResponsiveSheet,
   ResponsiveSheetContent,
   ResponsiveSheetTrigger,
 } from "@/components/finance/responsive-sheet";
+import { ItemFieldsRow, UnitDatalist, parseQty } from "@/components/finance/item-fields";
 import { addPlanItemsBulk } from "@/app/actions/rencana";
-import { parseShoppingList, type ParsedShoppingItem } from "@/lib/shopping-parser";
+import { parseShoppingList } from "@/lib/shopping-parser";
 import { formatRupiah } from "@/lib/format";
+import { MAX_ITEM_NAME_LENGTH, formatQtyValue, itemKey } from "@/lib/shopping-item";
+import { cn } from "@/lib/utils";
 
-const CONTOH = "Beras 5 kg, Minyak goreng 2 liter, Telur 1 kg, Sabun mandi, Susu anak 2 kotak";
+const CONTOH_BERPIPA = "Beras | 5 | kg, Minyak Goreng | 2 | liter, Telur | 1 | kg";
+const CONTOH_BEBAS = "Beras 5 kg, Minyak goreng 2 liter, Telur 1 kg, Sabun mandi";
 
-interface DraftRow extends ParsedShoppingItem {
+interface DraftRow {
   key: string;
+  name: string;
+  qty: string;
+  unit: string;
+  price: number;
+  /** Sudah ada di daftar rencana — dilewati kecuali pengguna memilih ikut. */
+  duplicate: boolean;
+  skipped: boolean;
 }
 
 /**
  * Tempel daftar belanja dari teks panjang.
  *
- * Teks dipecah per koma (juga per baris), lalu SELALU melewati layar
- * pratinjau: nama, jumlah, satuan, dan harga bisa diperbaiki sebelum
- * disimpan. Tidak ada yang langsung masuk tanpa dilihat pengguna.
+ * Teks dipecah per koma (juga per baris dan titik koma) dan mengerti dua gaya
+ * penulisan sekaligus: `Nama | qty | satuan` dan gaya bebas `Beras 5 kg`.
+ * Hasilnya SELALU melewati layar pratinjau — nama, jumlah, satuan, dan harga
+ * bisa diperbaiki sebelum disimpan; tidak ada yang langsung masuk.
+ *
+ * Barang yang namanya sudah ada di checklist ditandai dan otomatis dilewati,
+ * supaya menempel daftar yang sama dua kali tidak menggandakan isinya.
  */
-export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: React.ReactNode }) {
+export function PasteListSheet({
+  planId,
+  existingItems = [],
+  trigger,
+}: {
+  planId: string;
+  /** Barang yang sudah ada di rencana — dipakai mendeteksi duplikat. */
+  existingItems?: { name: string; unit?: string | null }[];
+  trigger?: React.ReactNode;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [rows, setRows] = useState<DraftRow[] | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const total = useMemo(
-    () => (rows ?? []).reduce((acc, row) => acc + Math.round(row.qty * row.price), 0),
-    [rows]
+  const existingKeys = useMemo(
+    () => new Set(existingItems.map((item) => itemKey(item.name, item.unit))),
+    [existingItems]
   );
+
+  const included = (rows ?? []).filter((row) => !row.skipped && row.name.trim().length > 0);
+  const total = included.reduce((acc, row) => acc + Math.round(parseQty(row.qty) * row.price), 0);
+  const skippedCount = (rows ?? []).length - included.length;
 
   const reset = () => {
     setText("");
@@ -54,7 +81,21 @@ export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: 
       toast.error("Tidak ada barang yang bisa dibaca dari teks itu.");
       return;
     }
-    setRows(parsed.map((item, index) => ({ ...item, key: `${index}-${item.name}` })));
+
+    setRows(
+      parsed.map((item, index) => {
+        const duplicate = existingKeys.has(itemKey(item.name, item.unit));
+        return {
+          key: `${index}-${item.name}`,
+          name: item.name,
+          qty: formatQtyValue(item.qty),
+          unit: item.unit,
+          price: item.price,
+          duplicate,
+          skipped: duplicate,
+        };
+      })
+    );
   };
 
   const patch = (key: string, next: Partial<DraftRow>) =>
@@ -64,14 +105,14 @@ export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: 
     setRows((current) => current?.filter((row) => row.key !== key) ?? null);
 
   const handleSave = () => {
-    if (isPending || !rows?.length) return;
+    if (isPending || included.length === 0) return;
 
     startTransition(async () => {
       const result = await addPlanItemsBulk(
         planId,
-        rows.map((row) => ({
-          name: row.name,
-          qty: row.qty,
+        included.map((row) => ({
+          name: row.name.trim(),
+          qty: parseQty(row.qty),
           estimatedPrice: row.price,
           unit: row.unit,
         }))
@@ -82,7 +123,7 @@ export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: 
         return;
       }
 
-      toast.success(`${result.data?.added ?? rows.length} barang masuk ke checklist.`);
+      toast.success(`${result.data?.added ?? included.length} barang masuk ke checklist.`);
       reset();
       setOpen(false);
       router.refresh();
@@ -108,8 +149,10 @@ export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: 
 
       <ResponsiveSheetContent
         title="Tempel Daftar Belanja"
-        description="Pisahkan tiap barang dengan koma. Semuanya bisa diperbaiki sebelum disimpan."
+        description="Pisahkan tiap barang dengan koma atau baris baru. Semuanya bisa diperbaiki sebelum disimpan."
       >
+        <UnitDatalist />
+
         {rows === null ? (
           <div className="space-y-3.5">
             <div className="space-y-1.5">
@@ -120,91 +163,121 @@ export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: 
                 onChange={(e) => setText(e.target.value)}
                 rows={6}
                 autoFocus
-                placeholder={CONTOH}
+                placeholder={`${CONTOH_BERPIPA}\natau\n${CONTOH_BEBAS}`}
                 className="min-h-[140px] rounded-xl border-2"
               />
             </div>
 
-            <button
-              type="button"
-              onClick={() => setText(CONTOH)}
-              className="w-full rounded-xl bg-surface-2 px-3 py-2.5 text-left text-[11px] font-semibold text-ink-3 transition-colors active:bg-primary-light"
-            >
-              Contoh: <span className="text-ink-2">{CONTOH}</span>
-            </button>
+            <section className="space-y-2 rounded-2xl bg-surface-2 p-3">
+              <p className="text-[11px] font-black uppercase tracking-wide text-ink-3">
+                Dua cara menulis — pilih yang paling mudah
+              </p>
 
-            <GameButton type="button" variant="primary" block disabled={!text.trim()} onClick={handlePreview}>
+              <FormatExample
+                title="Rapi: Nama | jumlah | satuan"
+                example={CONTOH_BERPIPA}
+                hint="Paling akurat. Kolom keempat boleh diisi harga satuan."
+                onUse={() => setText(CONTOH_BERPIPA)}
+              />
+              <FormatExample
+                title="Bebas: seperti menulis di WhatsApp"
+                example={CONTOH_BEBAS}
+                hint="Jumlah & satuan dibaca otomatis. Menulis nama saja pun boleh."
+                onUse={() => setText(CONTOH_BEBAS)}
+              />
+
+              <p className="text-[11px] font-semibold leading-relaxed text-ink-3">
+                Pemisah antar barang: koma, titik koma, atau baris baru. Harga boleh ditulis
+                <span className="font-black text-ink-2"> @12.000</span> atau
+                <span className="font-black text-ink-2"> Rp12.000</span>. Barang kosong diabaikan.
+              </p>
+            </section>
+
+            <GameButton
+              type="button"
+              variant="primary"
+              block
+              disabled={!text.trim()}
+              onClick={handlePreview}
+            >
               Lihat Pratinjau
             </GameButton>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-black text-ink-1">{rows.length} barang terbaca</p>
+              <div className="min-w-0">
+                <p className="text-sm font-black text-ink-1">{included.length} barang akan ditambahkan</p>
+                {skippedCount > 0 && (
+                  <p className="text-[11px] font-semibold text-ink-3">
+                    {skippedCount} dilewati karena sudah ada di daftar
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setRows(null)}
-                className="text-xs font-black text-primary underline-offset-2 hover:underline"
+                className="tap-target flex shrink-0 items-center gap-1 rounded-xl px-2 text-xs font-black text-primary"
               >
-                Ubah teks
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Ubah teks
               </button>
             </div>
 
             <ul className="space-y-2.5">
               {rows.map((row, index) => (
-                <li key={row.key} className="rounded-2xl border-2 border-border bg-surface-2 p-3">
+                <li
+                  key={row.key}
+                  className={cn(
+                    "rounded-2xl border-2 border-border bg-surface-2 p-3 transition-opacity",
+                    row.skipped && "opacity-60"
+                  )}
+                >
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-[11px] font-extrabold uppercase tracking-wide text-ink-3">
-                      Barang {index + 1}
+                      {row.duplicate ? (
+                        <span className="rounded-full bg-primary-light px-2 py-0.5 text-primary">
+                          Sudah ada di daftar
+                        </span>
+                      ) : (
+                        `Barang ${index + 1}`
+                      )}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => remove(row.key)}
-                      aria-label={`Hapus ${row.name}`}
-                      className="tap-target flex items-center justify-center rounded-xl text-destructive transition-colors active:bg-destructive/10"
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {row.duplicate && (
+                        <button
+                          type="button"
+                          onClick={() => patch(row.key, { skipped: !row.skipped })}
+                          className="tap-target flex items-center gap-1 rounded-xl px-2 text-[11px] font-black text-ink-2"
+                        >
+                          <Undo2 className="h-3.5 w-3.5" aria-hidden />
+                          {row.skipped ? "Tambahkan juga" : "Lewati"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => remove(row.key)}
+                        aria-label={`Hapus ${row.name}`}
+                        className="tap-target flex items-center justify-center rounded-xl text-destructive transition-colors active:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
                   </div>
 
                   <Input
                     value={row.name}
                     onChange={(e) => patch(row.key, { name: e.target.value })}
-                    maxLength={80}
+                    maxLength={MAX_ITEM_NAME_LENGTH}
                     aria-label={`Nama barang ${index + 1}`}
                   />
 
-                  <div className="mt-2.5 grid grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Jumlah</Label>
-                      <Input
-                        inputMode="decimal"
-                        value={String(row.qty)}
-                        onChange={(e) => {
-                          const parsed = Number(e.target.value.replace(/[^\d.]/g, ""));
-                          patch(row.key, { qty: Number.isFinite(parsed) && parsed > 0 ? parsed : 1 });
-                        }}
-                        className="tabular text-center"
-                        aria-label={`Jumlah barang ${index + 1}`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Satuan</Label>
-                      <Input
-                        value={row.unit}
-                        onChange={(e) => patch(row.key, { unit: e.target.value.slice(0, 20) })}
-                        placeholder="kg"
-                        aria-label={`Satuan barang ${index + 1}`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Harga</Label>
-                      <CurrencyInput
-                        value={row.price}
-                        onValueChange={(price) => patch(row.key, { price })}
-                        aria-label={`Harga barang ${index + 1}`}
-                      />
-                    </div>
+                  <div className="mt-2.5">
+                    <ItemFieldsRow
+                      index={index}
+                      draft={row}
+                      priceLabel="Perkiraan"
+                      onPatch={(next) => patch(row.key, next)}
+                    />
                   </div>
                 </li>
               ))}
@@ -219,15 +292,39 @@ export function PasteListSheet({ planId, trigger }: { planId: string; trigger?: 
                 type="button"
                 variant="primary"
                 block
-                disabled={isPending || rows.length === 0}
+                disabled={isPending || included.length === 0}
                 onClick={handleSave}
               >
-                {isPending ? "Menyimpan…" : `Tambahkan ${rows.length} Barang`}
+                {isPending ? "Menyimpan…" : `Tambahkan ${included.length} Barang`}
               </GameButton>
             </div>
           </div>
         )}
       </ResponsiveSheetContent>
     </ResponsiveSheet>
+  );
+}
+
+function FormatExample({
+  title,
+  example,
+  hint,
+  onUse,
+}: {
+  title: string;
+  example: string;
+  hint: string;
+  onUse: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onUse}
+      className="block w-full rounded-xl bg-card px-3 py-2.5 text-left transition-colors active:bg-primary-light"
+    >
+      <p className="text-[11px] font-black text-ink-2">{title}</p>
+      <p className="mt-0.5 break-words font-mono text-[11px] font-semibold text-ink-1">{example}</p>
+      <p className="mt-1 text-[10.5px] font-semibold text-ink-3">{hint}</p>
+    </button>
   );
 }
