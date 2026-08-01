@@ -222,6 +222,22 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------
+-- 2b. Kuantitas pecahan untuk barang timbangan
+-- ---------------------------------------------------------------------
+-- shopping_plan_items.qty masih `int` sejak skema awal, padahal seluruh
+-- aplikasi di atasnya sudah memperlakukan kuantitas sebagai pecahan:
+-- parseQty() membulatkan ke 2 desimal, formatQtyValue() menulis "1,5", dan
+-- setPlanItemQty() menerima angka pecahan. Akibatnya barang timbangan —
+-- "APEL FUJI 0,472 kg" pada struk Lotte — DITOLAK database dengan
+-- 22P02 invalid input syntax for type integer.
+--
+-- numeric(10,3) dipilih (bukan ,2) karena timbangan supermarket mencetak
+-- tiga desimal. shopping_transaction_items sudah numeric(10,2), jadi
+-- ketelitian rencana tidak akan pernah lebih rendah dari transaksinya.
+alter table shopping_plan_items
+  alter column qty type numeric(10, 3) using qty::numeric(10, 3);
+
+-- ---------------------------------------------------------------------
 -- 3. Idempotensi impor struk
 -- ---------------------------------------------------------------------
 -- Sidik jari berkas (SHA-256 hex) DAN sidik jari data transaksi (merchant +
