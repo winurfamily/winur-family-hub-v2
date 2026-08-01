@@ -82,3 +82,29 @@ export function isUuid(value: unknown): value is string {
 export function safeToken(value: unknown): string | null {
   return isUuid(value) ? value : null;
 }
+
+/**
+ * Apakah error ini berarti "tabel/kolom belum ada di database"?
+ *
+ * Fitur yang datang bersama migration baru memakai ini untuk MENURUNKAN
+ * kualitas layanan dengan anggun alih-alih meledak: menu tetap terbuka penuh
+ * dan panel fiturnya menampilkan satu instruksi menjalankan migration. Pola
+ * yang sama sudah dipakai getBudgetOverview() untuk migration 0022, dan
+ * lingkungan baru (mis. klon repo untuk pengembangan) tetap butuh ini
+ * walaupun database produksi sudah diperbarui.
+ */
+export function isMissingSchema(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  // 42P01 tabel tidak ada · 42703 kolom tidak ada · PGRST20x tidak ada di cache skema.
+  return (
+    error.code === "42P01" ||
+    error.code === "42703" ||
+    error.code === "PGRST202" ||
+    error.code === "PGRST205" ||
+    /does not exist|schema cache/i.test(error.message ?? "")
+  );
+}
+
+/** Pesan seragam saat sebuah fitur menunggu migration 0025 dijalankan. */
+export const NEEDS_0025 =
+  "Fitur ini butuh migration 0025 dijalankan di SQL Editor Supabase lebih dulu.";

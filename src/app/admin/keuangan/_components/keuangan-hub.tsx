@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import {
   ArrowRightLeft,
   BarChart3,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Info,
   Loader2,
   PiggyBank,
   ReceiptText,
+  Scale,
   Target,
   Wallet,
 } from "lucide-react";
@@ -25,9 +27,15 @@ import { TransferForm } from "./transfer-form";
 import { TransferHistoryList } from "./transfer-history";
 import { PocketDialog } from "./pocket-dialog";
 import { PocketList } from "./pocket-list";
+import { AlertStack } from "./alert-stack";
+import { AdjustBalanceSheet } from "./adjust-balance-sheet";
+import { AdjustmentHistory } from "./adjustment-history";
+import { RecurringPanel } from "./recurring-panel";
 import type { FinanceSummary, MonthlyTrendPoint, TransferHistoryResult } from "@/app/actions/keuangan";
 import type { LedgerResult } from "@/app/actions/riwayat";
 import type { BudgetOverview } from "@/app/actions/budget";
+import type { AdjustmentListResult } from "@/app/actions/penyesuaian";
+import type { RecurringOverview } from "@/app/actions/rutin";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/supabase/types";
 import { formatRupiah, formatDate } from "@/lib/format";
 
@@ -52,11 +60,17 @@ function ChartSkeleton() {
   );
 }
 
-type Tab = "ringkasan" | "transaksi" | "analitik" | "dompet" | "anggaran";
+type Tab = "ringkasan" | "transaksi" | "rutin" | "analitik" | "dompet" | "anggaran";
 
+/**
+ * Urutan tab mengikuti seberapa sering masing-masing dibuka. "Rutin" duduk
+ * tepat setelah "Transaksi" karena keduanya dilihat pada kunjungan harian
+ * yang sama: apa yang sudah tercatat, dan apa yang menunggu dikonfirmasi.
+ */
 const TABS = [
   { id: "ringkasan" as const, label: "Ringkasan", icon: <Wallet className="h-4 w-4" /> },
   { id: "transaksi" as const, label: "Transaksi", icon: <ReceiptText className="h-4 w-4" /> },
+  { id: "rutin" as const, label: "Rutin", icon: <CalendarClock className="h-4 w-4" /> },
   { id: "analitik" as const, label: "Analitik", icon: <BarChart3 className="h-4 w-4" /> },
   { id: "dompet" as const, label: "Dompet", icon: <PiggyBank className="h-4 w-4" /> },
   { id: "anggaran" as const, label: "Anggaran", icon: <Target className="h-4 w-4" /> },
@@ -93,6 +107,8 @@ export function KeuanganHub({
   transfers,
   trend,
   budget,
+  adjustments,
+  recurring,
   dateFrom,
   dateTo,
 }: {
@@ -103,6 +119,8 @@ export function KeuanganHub({
   transfers: TransferHistoryResult;
   trend: MonthlyTrendPoint[];
   budget: BudgetOverview;
+  adjustments: AdjustmentListResult;
+  recurring: RecurringOverview;
   dateFrom: string;
   dateTo: string;
 }) {
@@ -152,6 +170,16 @@ export function KeuanganHub({
 
   const [year, monthNumber] = month.split("-").map(Number);
   const refresh = () => router.refresh();
+
+  /**
+   * Saldo Utama + pocket, dalam bentuk yang dipakai pemilih akun penyesuaian.
+   * Sengaja tanpa useMemo: daftarnya paling banyak beberapa baris, dan
+   * penerimanya hanya membacanya saat panel dibuka.
+   */
+  const adjustAccounts = [
+    { id: "main", name: "Saldo Utama", balance: saldoUtama },
+    ...pockets.map((pocket) => ({ id: pocket.id, name: pocket.name, balance: pocket.balance })),
+  ];
 
   return (
     <div className="space-y-4 pb-4">
@@ -211,6 +239,11 @@ export function KeuanganHub({
         pocketOptions={options.pockets}
         onChanged={refresh}
       />
+
+      {/* Peringatan berada DI ATAS tab, bukan di dalam salah satunya: anggaran
+          yang terlampaui harus terlihat sejak menu dibuka, bukan hanya oleh
+          orang yang kebetulan membuka tab Anggaran. */}
+      <AlertStack alerts={budget.alerts} onNavigate={setTab} />
 
       <SegmentTabs tabs={TABS} active={tab} onChange={setTab} />
 
@@ -303,6 +336,9 @@ export function KeuanganHub({
         />
       )}
 
+      {/* ---------- Transaksi rutin ---------- */}
+      {tab === "rutin" && <RecurringPanel overview={recurring} pockets={options.pockets} />}
+
       {/* ---------- Analitik ---------- */}
       {tab === "analitik" && (
         <div className="space-y-4 xl:grid xl:grid-cols-2 xl:items-start xl:gap-4 xl:space-y-0">
@@ -355,6 +391,38 @@ export function KeuanganHub({
 
           <div className="space-y-4">
             <TransferForm pockets={pockets} saldoUtama={saldoUtama} />
+
+            {/* Penyesuaian saldo tinggal di Dompet, bukan di bilah pencatatan.
+                Ia mengoreksi SEBUAH AKUN, bukan mencatat transaksi baru —
+                menaruhnya bersebelahan dengan Pendapatan/Pengeluaran akan
+                mengundangnya dipakai sebagai jalan pintas mencatat uang. */}
+            <Panel className="p-4">
+              <SectionTitle
+                icon={<Scale className="h-[18px] w-[18px]" />}
+                title="Penyesuaian Saldo"
+                action={
+                  <AdjustBalanceSheet
+                    accounts={adjustAccounts}
+                    trigger={
+                      <button
+                        type="button"
+                        className="tap-target rounded-xl bg-primary-light px-3 text-xs font-black text-primary transition-transform duration-150 active:scale-95"
+                      >
+                        Sesuaikan
+                      </button>
+                    }
+                  />
+                }
+              />
+              <p className="mt-1 text-[11px] font-semibold text-ink-3">
+                Dipakai saat saldo aplikasi berbeda dari uang yang sebenarnya. Alasannya wajib diisi
+                dan tersimpan permanen.
+              </p>
+              <div className="mt-3">
+                <AdjustmentHistory items={adjustments.items} ready={adjustments.ready} />
+              </div>
+            </Panel>
+
             <Panel className="p-4">
               <SectionTitle
                 icon={<ArrowRightLeft className="h-[18px] w-[18px]" />}

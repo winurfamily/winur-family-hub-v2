@@ -22,6 +22,7 @@ import {
   type PlanView,
   type ShoppingSource,
 } from "@/app/actions/rencana";
+import { getShoppingInsights } from "@/app/actions/belanja-pintar";
 import { formatDate, formatMonthLabel, formatRupiah } from "@/lib/format";
 import { nextMonth, nextMonthDate } from "@/lib/period";
 import { MAX_ITEM_NAME_LENGTH, formatQtyValue } from "@/lib/shopping-item";
@@ -29,13 +30,19 @@ import { cn } from "@/lib/utils";
 
 interface SourceChoice {
   id: string;
-  kind: "plan" | "transaction";
+  kind: "plan" | "transaction" | "smart";
   label: string;
   date: string | null;
   total: number;
   itemCount: number;
   items?: PlanTemplateItem[];
 }
+
+const SOURCE_BADGE: Record<SourceChoice["kind"], { label: string; className: string }> = {
+  smart: { label: "Kebiasaan", className: "bg-accent-light text-accent" },
+  plan: { label: "Rencana", className: "bg-primary-light text-primary" },
+  transaction: { label: "Transaksi", className: "bg-secondary-light text-secondary-dark" },
+};
 
 const newRow = (): ItemDraft => ({
   key: crypto.randomUUID(),
@@ -72,6 +79,7 @@ export function GeneratePlanSheet({ plans, trigger }: { plans: PlanView[]; trigg
   const savedRef = useRef(false);
 
   const [transactionSources, setTransactionSources] = useState<ShoppingSource[] | null>(null);
+  const [smartSource, setSmartSource] = useState<SourceChoice | null>(null);
   const [chosen, setChosen] = useState<SourceChoice | null>(null);
   const [rows, setRows] = useState<ItemDraft[]>([]);
   const [name, setName] = useState("");
@@ -115,7 +123,37 @@ export function GeneratePlanSheet({ plans, trigger }: { plans: PlanView[]; trigg
     setLoadingSources(true);
     startTransition(async () => {
       try {
-        setTransactionSources(await getShoppingSources());
+        // Dua sumber diambil sekaligus saat panel dibuka: riwayat transaksi
+        // satuan, dan ringkasan kebiasaan 3 bulan. Yang kedua biasanya
+        // pilihan terbaik untuk rencana bulan depan — ia menggabungkan
+        // beberapa kali belanja, bukan menyalin satu struk yang kebetulan.
+        const [transactions, insights] = await Promise.all([
+          getShoppingSources(),
+          getShoppingInsights(),
+        ]);
+        setTransactionSources(transactions);
+
+        if (insights.recommendations.length > 0) {
+          setSmartSource({
+            id: "smart",
+            kind: "smart",
+            label: "Barang yang rutin dibeli",
+            date: insights.sourceMonths[insights.sourceMonths.length - 1]
+              ? `${insights.sourceMonths[insights.sourceMonths.length - 1]}-01`
+              : null,
+            total: insights.recommendations.reduce(
+              (acc, item) => acc + Math.round(item.qty * item.lastPrice),
+              0
+            ),
+            itemCount: insights.recommendations.length,
+            items: insights.recommendations.map((item) => ({
+              name: item.name,
+              qty: item.qty,
+              unit: item.unit,
+              estimatedPrice: item.lastPrice,
+            })),
+          });
+        }
       } finally {
         setLoadingSources(false);
       }
@@ -201,9 +239,12 @@ export function GeneratePlanSheet({ plans, trigger }: { plans: PlanView[]; trigg
     });
   };
 
-  const allSources = [...planSources, ...(transactionSources ?? [])].filter(
-    (source) => source.itemCount > 0
-  );
+  // Kebiasaan lebih dulu: itulah usulan yang paling sering dipakai apa adanya.
+  const allSources = [
+    ...(smartSource ? [smartSource] : []),
+    ...planSources,
+    ...(transactionSources ?? []),
+  ].filter((source) => source.itemCount > 0);
 
   return (
     <ResponsiveSheet
@@ -257,20 +298,22 @@ export function GeneratePlanSheet({ plans, trigger }: { plans: PlanView[]; trigg
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[14px] font-black text-ink-1">{source.label}</p>
                         <p className="mt-0.5 text-[11px] font-semibold text-ink-3">
-                          {source.date ? formatDate(source.date) : "Tanpa tanggal"} · {source.itemCount}{" "}
-                          barang
+                          {source.kind === "smart"
+                            ? "Muncul di 2–3 bulan terakhir"
+                            : source.date
+                              ? formatDate(source.date)
+                              : "Tanpa tanggal"}{" "}
+                          · {source.itemCount} barang
                           {source.total > 0 ? ` · ${formatRupiah(source.total)}` : ""}
                         </p>
                       </div>
                       <span
                         className={cn(
                           "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase",
-                          source.kind === "plan"
-                            ? "bg-primary-light text-primary"
-                            : "bg-secondary-light text-secondary-dark"
+                          SOURCE_BADGE[source.kind].className
                         )}
                       >
-                        {source.kind === "plan" ? "Rencana" : "Transaksi"}
+                        {SOURCE_BADGE[source.kind].label}
                       </span>
                       <ChevronRight className="h-4 w-4 shrink-0 text-ink-3" aria-hidden />
                     </button>

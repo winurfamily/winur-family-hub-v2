@@ -13,6 +13,7 @@ import {
   Home,
   MoreHorizontal,
   ReceiptText,
+  Scale,
   ShoppingBasket,
   TrendingUp,
   Users,
@@ -100,9 +101,18 @@ export function incomeVisual(key: string | null | undefined): CategoryVisual {
 }
 
 /** Rupa untuk baris riwayat mana pun, termasuk transfer yang tak berkategori. */
-export function ledgerVisual(kind: "income" | "expense" | "transfer", categoryKey: string | null): CategoryVisual {
+export function ledgerVisual(
+  kind: "income" | "expense" | "transfer" | "adjustment",
+  categoryKey: string | null
+): CategoryVisual {
   if (kind === "transfer") {
     return { key: "transfer", label: "Transfer", Icon: ArrowRightLeft, fg: "#715ac8", bg: "#f1edff" };
+  }
+  if (kind === "adjustment") {
+    // Warna netral yang sengaja berbeda dari hijau pendapatan maupun merah
+    // pengeluaran: koreksi saldo bukan uang masuk atau keluar, dan menyamakan
+    // rupanya akan membuatnya terbaca sebagai transaksi biasa di daftar.
+    return { key: "adjustment", label: "Penyesuaian", Icon: Scale, fg: "#6b7280", bg: "#eef0f3" };
   }
   return kind === "income" ? incomeVisual(categoryKey) : expenseVisual(categoryKey);
 }

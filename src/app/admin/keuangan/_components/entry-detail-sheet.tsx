@@ -13,6 +13,7 @@ import {
 import { IncomeFormSheet } from "./income-form-sheet";
 import { deleteIncome, getIncomeDetail, type IncomeItem } from "@/app/actions/pendapatan";
 import { deletePocketTransfer } from "@/app/actions/keuangan";
+import { deleteBalanceAdjustment } from "@/app/actions/penyesuaian";
 import type { LedgerEntry } from "@/app/actions/riwayat";
 import { ledgerVisual } from "@/lib/finance-categories";
 import { formatDate, formatRupiah } from "@/lib/format";
@@ -53,7 +54,15 @@ export function EntryDetailSheet({
   }, [open, entry.kind, entry.id, income]);
 
   const visual = ledgerVisual(entry.kind, entry.categoryKey);
-  const sign = entry.kind === "income" ? "+" : entry.kind === "expense" ? "−" : "";
+  // Arah dibaca dari `direction`, bukan dari `kind` — penyesuaian saldo bisa
+  // menambah maupun mengurangi.
+  const sign = entry.direction === "in" ? "+" : entry.direction === "out" ? "−" : "";
+  const amountTone =
+    entry.direction === "in"
+      ? "text-secondary-dark"
+      : entry.direction === "out"
+        ? "text-destructive"
+        : "text-accent";
 
   return (
     <>
@@ -62,19 +71,15 @@ export function EntryDetailSheet({
           <div className="flex flex-col items-center pb-1 text-center">
             <CategoryBadge visual={visual} size="lg" />
             <p className="mt-2.5 break-words font-heading text-lg font-black text-ink-1">{entry.title}</p>
-            <p
-              className={cn(
-                "tabular mt-0.5 font-mono text-3xl font-black",
-                entry.kind === "income"
-                  ? "text-secondary-dark"
-                  : entry.kind === "transfer"
-                    ? "text-accent"
-                    : "text-destructive"
-              )}
-            >
+            <p className={cn("tabular mt-0.5 font-mono text-3xl font-black", amountTone)}>
               {sign}
               {formatRupiah(entry.amount)}
             </p>
+            {entry.kind === "adjustment" && (
+              <p className="mt-1 rounded-full bg-surface-2 px-3 py-1 text-[11px] font-black text-ink-2">
+                Koreksi saldo — bukan pendapatan atau pengeluaran
+              </p>
+            )}
           </div>
 
           <dl className="mt-4 divide-y divide-border rounded-2xl bg-surface-2 px-3.5">
@@ -82,7 +87,9 @@ export function EntryDetailSheet({
             <Row label={entry.kind === "transfer" ? "Perpindahan" : "Akun"} value={entry.account} />
             {entry.categoryLabel && <Row label="Kategori" value={entry.categoryLabel} />}
             <Row label="Dicatat oleh" value={entry.createdByName} />
-            {entry.note && <Row label="Catatan" value={entry.note} />}
+            {entry.note && (
+              <Row label={entry.kind === "adjustment" ? "Alasan" : "Catatan"} value={entry.note} />
+            )}
           </dl>
 
           <div className="mt-4 grid gap-2">
@@ -148,6 +155,28 @@ export function EntryDetailSheet({
                   <Receipt className="h-4 w-4" aria-hidden /> Lihat Rincian & Struk
                 </Link>
               </GameButton>
+            )}
+
+            {entry.kind === "adjustment" && (
+              <ConfirmDialog
+                title="Batalkan penyesuaian?"
+                message={`Saldo ${entry.account} akan dikembalikan ke angka sebelum koreksi ini. Berbeda dari menghapus riwayat transfer, penyesuaian memang tidak mewakili uang yang berpindah — jadi membatalkannya mengembalikan saldonya.`}
+                confirmLabel="Batalkan"
+                successMessage="Penyesuaian dibatalkan dan saldo dikembalikan."
+                onConfirm={() => deleteBalanceAdjustment(entry.id)}
+                onDone={() => {
+                  onOpenChange(false);
+                  onChanged();
+                }}
+                trigger={
+                  <button
+                    type="button"
+                    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-destructive/10 text-[15px] font-black text-destructive transition-transform duration-150 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden /> Batalkan Penyesuaian
+                  </button>
+                }
+              />
             )}
 
             {entry.kind === "transfer" && (

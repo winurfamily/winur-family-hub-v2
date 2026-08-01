@@ -7,6 +7,7 @@ import {
   revalidateKeuangan,
   toRupiah,
   isUuid,
+  isMissingSchema,
   FORBIDDEN,
   type AdminClient,
   type ActionResult,
@@ -14,6 +15,7 @@ import {
 import { createShoppingTransaction } from "@/app/actions/belanja";
 import { distributeTotal } from "@/lib/shopping-total";
 import { MAX_ITEM_NAME_LENGTH, normalizeItemName, normalizeUnit } from "@/lib/shopping-item";
+import { isShoppingCategory, resolveItemCategory, type ShoppingCategory } from "@/lib/shopping-category";
 import { formatMonthLabel } from "@/lib/format";
 import type { ShoppingPlanStatus, ShoppingPlanItemStatus } from "@/lib/supabase/types";
 
@@ -28,6 +30,12 @@ export interface PlanItemView {
   estimatedPrice: number;
   actualPrice: number | null;
   status: ShoppingPlanItemStatus;
+  /**
+   * Kelompok rak toko. Diambil dari kolom `category` bila sudah diisi manual,
+   * selain itu DITEBAK dari nama barang — jadi checklist tetap terkelompok
+   * rapi walau tidak ada yang pernah mengatur kategorinya satu per satu.
+   */
+  category: ShoppingCategory;
   /** Satuan barang ("kg", "kotak"). Disimpan di kolom `note`. */
   unit: string | null;
   note: string | null;
@@ -130,6 +138,57 @@ async function recalcPlanTotals(supabase: AdminClient, planId: string) {
 // Baca
 // ---------------------------------------------------------------------------
 
+interface PlanItemRow {
+  id: string;
+  plan_id: string;
+  name: string;
+  qty: number | string;
+  estimated_price: number | string;
+  actual_price: number | string | null;
+  status: ShoppingPlanItemStatus;
+  category: string | null;
+  note: string | null;
+  transaction_id: string | null;
+  position: number;
+}
+
+const PLAN_ITEM_COLUMNS =
+  "id, plan_id, name, qty, estimated_price, actual_price, status, note, transaction_id, position";
+
+/**
+ * Ambil barang rencana beserta kolom `category`.
+ *
+ * `category` baru ada setelah migration 0025. Selama belum, PostgREST menolak
+ * kolom itu (42703) — permintaan diulang tanpa `category` dan pengelompokan
+ * jatuh ke tebakan dari nama barang. Pola cadangan yang sama sudah dipakai
+ * untuk kolom `unit` (migration 0024); tanpa itu, seluruh menu Belanja gagal
+ * dimuat di lingkungan yang tertinggal satu migration.
+ */
+async function selectPlanItems(supabase: AdminClient, planIds: string[]): Promise<PlanItemRow[]> {
+  if (planIds.length === 0) return [];
+
+  const withCategory = await supabase
+    .from("shopping_plan_items")
+    .select(`${PLAN_ITEM_COLUMNS}, category`)
+    .in("plan_id", planIds)
+    .order("position", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (!withCategory.error) return (withCategory.data ?? []) as PlanItemRow[];
+
+  const legacy = await supabase
+    .from("shopping_plan_items")
+    .select(PLAN_ITEM_COLUMNS)
+    .in("plan_id", planIds)
+    .order("position", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  return ((legacy.data ?? []) as Omit<PlanItemRow, "category">[]).map((row) => ({
+    ...row,
+    category: null,
+  }));
+}
+
 export async function getShoppingPlans(includeArchived = false): Promise<PlanView[]> {
   const session = await requireFinanceSession();
   if (!session) return [];
@@ -145,18 +204,13 @@ export async function getShoppingPlans(includeArchived = false): Promise<PlanVie
   const { data: plans } = await query.order("created_at", { ascending: false });
   if (!plans || plans.length === 0) return [];
 
-  const { data: items } = await supabase
-    .from("shopping_plan_items")
-    .select("id, plan_id, name, qty, estimated_price, actual_price, status, note, transaction_id, position")
-    .in(
-      "plan_id",
-      plans.map((p) => p.id)
-    )
-    .order("position", { ascending: true })
-    .order("created_at", { ascending: true });
+  const items = await selectPlanItems(
+    supabase,
+    plans.map((p) => p.id)
+  );
 
   return plans.map((p) => {
-    const planItems: PlanItemView[] = (items ?? [])
+    const planItems: PlanItemView[] = items
       .filter((i) => i.plan_id === p.id)
       .map((i) => {
         const qty = Number(i.qty);
@@ -169,6 +223,7 @@ export async function getShoppingPlans(includeArchived = false): Promise<PlanVie
           estimatedPrice: estimated,
           actualPrice: actual,
           status: i.status,
+          category: resolveItemCategory(i.category, i.name),
           unit: i.note,
           note: i.note,
           transactionId: i.transaction_id,
@@ -606,6 +661,39 @@ export async function setPlanItemQty(itemId: string, qty: number): Promise<Actio
   if (error) return { success: false, error: "Gagal memperbarui kuantitas." };
 
   await recalcPlanTotals(supabase, item.plan_id);
+  revalidateKeuangan();
+  return { success: true };
+}
+
+/**
+ * Timpa kelompok rak sebuah barang.
+ *
+ * Hanya dipakai ketika tebakan otomatis meleset — mayoritas barang tidak
+ * pernah menyentuh fungsi ini, karena kategorinya sudah benar sejak diketik.
+ */
+export async function setPlanItemCategory(itemId: string, category: string): Promise<ActionResult> {
+  const session = await requireFinanceSession();
+  if (!session) return { success: false, error: FORBIDDEN };
+  if (!isShoppingCategory(category)) return { success: false, error: "Kategori tidak dikenal." };
+
+  const supabase = createAdminClient();
+  const item = await resolveOwnedItem(supabase, session.familyId, itemId);
+  if (!item) return { success: false, error: "Barang tidak ditemukan." };
+
+  const { error } = await supabase
+    .from("shopping_plan_items")
+    .update({ category, updated_at: new Date().toISOString() })
+    .eq("id", itemId);
+
+  if (isMissingSchema(error)) {
+    return {
+      success: false,
+      error:
+        "Mengatur kategori manual butuh migration 0025. Sementara ini kelompoknya ditebak dari nama barang.",
+    };
+  }
+  if (error) return { success: false, error: "Gagal mengubah kategori barang." };
+
   revalidateKeuangan();
   return { success: true };
 }

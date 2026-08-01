@@ -381,8 +381,65 @@ export type ProductRow = {
   last_price: number;
   avg_price: number;
   buy_count: number;
+  /** Ditandai manual sebagai favorit (migration 0025). */
+  is_favorite: boolean;
   created_at: string;
   updated_at: string;
+};
+
+/** Koreksi saldo (migration 0025). Selalu menyimpan saldo sebelum & sesudah. */
+export type BalanceAdjustmentRow = {
+  id: string;
+  family_id: string;
+  /** NULL = Saldo Utama. */
+  pocket_id: string | null;
+  balance_before: number;
+  balance_after: number;
+  /** balance_after − balance_before. Positif = saldo ditambah. */
+  delta: number;
+  reason: string;
+  date: string;
+  client_token: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type RecurringKind = "income" | "expense";
+export type RecurringOccurrenceStatus = "pending" | "confirmed" | "skipped";
+
+/** Jadwal transaksi rutin (migration 0025). Tidak pernah memotong saldo sendiri. */
+export type RecurringTransactionRow = {
+  id: string;
+  family_id: string;
+  name: string;
+  kind: RecurringKind;
+  amount: number;
+  category: string;
+  pocket_id: string | null;
+  frequency: "weekly" | "monthly" | "yearly";
+  start_date: string;
+  next_date: string;
+  end_date: string | null;
+  note: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Satu jatuh tempo yang menunggu konfirmasi manusia (migration 0025). */
+export type RecurringOccurrenceRow = {
+  id: string;
+  family_id: string;
+  recurring_id: string;
+  due_date: string;
+  status: RecurringOccurrenceStatus;
+  amount: number;
+  income_id: string | null;
+  transaction_id: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  created_at: string;
 };
 
 export type ShoppingPlanRow = {
@@ -410,6 +467,8 @@ export type ShoppingPlanItemRow = {
   /** Kolom lama; dipertahankan agar sinkron dengan `status`. */
   checked: boolean;
   status: ShoppingPlanItemStatus;
+  /** Kelompok rak toko (migration 0025). Null = ditebak dari nama. */
+  category: string | null;
   note: string | null;
   transaction_id: string | null;
   position: number;
@@ -637,7 +696,40 @@ export interface Database {
       >;
       products: Helper<
         ProductRow,
-        "id" | "category" | "last_price" | "avg_price" | "buy_count" | "created_at" | "updated_at"
+        | "id"
+        | "category"
+        | "last_price"
+        | "avg_price"
+        | "buy_count"
+        | "is_favorite"
+        | "created_at"
+        | "updated_at"
+      >;
+      balance_adjustments: Helper<
+        BalanceAdjustmentRow,
+        "id" | "pocket_id" | "date" | "client_token" | "created_by" | "created_at"
+      >;
+      recurring_transactions: Helper<
+        RecurringTransactionRow,
+        | "id"
+        | "category"
+        | "pocket_id"
+        | "end_date"
+        | "note"
+        | "is_active"
+        | "created_by"
+        | "created_at"
+        | "updated_at"
+      >;
+      recurring_occurrences: Helper<
+        RecurringOccurrenceRow,
+        | "id"
+        | "status"
+        | "income_id"
+        | "transaction_id"
+        | "resolved_at"
+        | "resolved_by"
+        | "created_at"
       >;
       shopping_plans: Helper<
         ShoppingPlanRow,
@@ -660,6 +752,7 @@ export interface Database {
         | "actual_price"
         | "checked"
         | "status"
+        | "category"
         | "note"
         | "transaction_id"
         | "position"
@@ -803,6 +896,30 @@ export interface Database {
       fin_delete_shopping: {
         Args: { p_transaction_id: string; p_family_id: string };
         Returns: undefined;
+      };
+      fin_create_adjustment: {
+        Args: {
+          p_family_id: string;
+          p_pocket_id: string | null;
+          p_delta: number;
+          p_reason: string;
+          p_date: string;
+          p_created_by: string;
+          p_client_token?: string | null;
+        };
+        Returns: string;
+      };
+      fin_delete_adjustment: {
+        Args: { p_adjustment_id: string; p_family_id: string };
+        Returns: undefined;
+      };
+      fin_generate_recurring_occurrences: {
+        Args: { p_family_id: string; p_horizon: string };
+        Returns: number;
+      };
+      fin_recurring_next_date: {
+        Args: { p_date: string; p_frequency: string; p_anchor_day?: number | null };
+        Returns: string;
       };
       fin_storage_usage: {
         Args: { p_family_id: string };
