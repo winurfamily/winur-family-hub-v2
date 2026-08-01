@@ -4,6 +4,7 @@ import { distributeTotal } from "@/lib/shopping-total";
 import { parseShoppingList } from "@/lib/shopping-parser";
 import { nextMonthDate } from "@/lib/period";
 import { normalizeUnit } from "@/lib/shopping-item";
+import { toJakartaISODate } from "@/lib/format";
 
 /**
  * Integrasi alur Belanja terhadap Supabase sungguhan.
@@ -37,6 +38,52 @@ let actorId: string;
 const createdFamilies: string[] = [];
 
 const TODAY = "2026-08-01";
+
+/**
+ * Tempelan sungguhan bergaya `Nama ; jumlah ; satuan` — 37 baris.
+ *
+ * Ini FIXTURE TEST, bukan seed dan bukan template: hanya dipakai di dalam
+ * keluarga `__test_belanja__` yang dibuat dan dihapus lagi oleh suite ini.
+ */
+const DAFTAR_BULANAN = `
+Minyak Goreng ; 2 ; liter
+Indomie Soto ; 2 ; pcs
+Indomie Ayam Bawang ; 3 ; pcs
+Indomie Goreng ; 3 ; pcs
+Sedap Mie Ayam Bawang ; 2 ; pcs
+Mie Gelas ; 1 ; pack
+Tepung Roti ; 200 ; gram
+Kecap Manis ; 275 ; ml
+Saos Sambal ; 135 ; ml
+Sarden ; 2 ; kaleng
+Saos Tomat ; 275 ; ml
+Soklin Cair ; 750 ; ml
+Soklin Pewangi ; 800 ; ml
+Sikat Gigi Daffa ; 1 ; buah
+Sikat Gigi Ortu ; 3 ; buah
+Tolak Angin ; 6 ; pcs
+Margarin Forvita ; 200 ; gram
+Mama Lemon ; 950 ; ml
+Sabun Cuci Tangan ; 1 ; pcs
+Tepung Serbaguna ; 1 ; pcs
+Kaldu Jamur ; 1 ; pcs
+Kaldu Sapi ; 1 ; pcs
+Keju Cheddar ; 1 ; pcs
+Keju Slice ; 1 ; pcs
+Ladaku ; 1 ; pcs
+Bawang Putih Bubuk ; 1 ; pcs
+Mayonais ; 1 ; pcs
+Sabun Mandi Daffa ; 1 ; pcs
+Sosis ; 1 ; pcs
+Bakso Sapi ; 1 ; pcs
+Bakso Ayam ; 1 ; pcs
+Saos Tiram ; 1 ; pcs
+Kecap Asin ; 1 ; pcs
+Madu ; 1 ; pcs
+Tepung Tapioka ; 1 ; pcs
+Tepung Terigu ; 1 ; pcs
+Susu Kental Manis ; 1 ; pcs
+`.trim();
 
 async function mainBalance(): Promise<number> {
   const { data } = await db.from("families").select("main_balance").eq("id", familyId).single();
@@ -166,6 +213,101 @@ d("Alur Belanja (integrasi Supabase)", () => {
     expect(after.filter((i) => i.status === "bought")).toHaveLength(1);
     expect(after.filter((i) => i.status === "cancelled")).toHaveLength(1);
     expect(after.filter((i) => i.status === "pending")).toHaveLength(3);
+  });
+
+  it("menempel daftar bergaya 'Nama ; jumlah ; satuan' menjadi rencana lengkap", async () => {
+    const planId = await createPlan("Belanja Titik Koma");
+    const parsed = await pasteIntoPlan(planId, DAFTAR_BULANAN);
+
+    // Satu baris = satu barang; tidak ada yang menyatu atau hilang.
+    expect(parsed).toHaveLength(DAFTAR_BULANAN.trim().split("\n").length);
+
+    const items = await planItems(planId);
+    expect(items).toHaveLength(37);
+    expect(items[0].name).toBe("Minyak Goreng");
+    expect(Number(items[0].qty)).toBe(2);
+    expect(items[0].note).toBe("liter");
+    // Satuan yang jarang dipakai pun ikut tersimpan apa adanya.
+    expect(items.find((i) => i.name === "Tepung Roti")?.note).toBe("gram");
+    expect(Number(items.find((i) => i.name === "Kecap Manis")?.qty)).toBe(275);
+    expect(items.find((i) => i.name === "Sarden")?.note).toBe("kaleng");
+    expect(items.find((i) => i.name === "Mie Gelas")?.note).toBe("pack");
+    expect(items.every((i) => i.status === "pending")).toBe(true);
+    expect(items.every((i) => Number(i.qty) > 0)).toBe(true);
+
+    // Checklist bisa dicentang, barang bisa diedit, barang bisa dihapus.
+    const beras = items[0];
+    await db.from("shopping_plan_items").update({ status: "bought", checked: true }).eq("id", beras.id);
+    await db.from("shopping_plan_items").update({ qty: 4, note: "botol" }).eq("id", items[1].id);
+    await db.from("shopping_plan_items").delete().eq("id", items[2].id);
+
+    const after = await planItems(planId);
+    expect(after).toHaveLength(36);
+    expect(after.find((i) => i.id === beras.id)?.status).toBe("bought");
+    expect(Number(after.find((i) => i.id === items[1].id)?.qty)).toBe(4);
+    expect(after.find((i) => i.id === items[1].id)?.note).toBe("botol");
+    // Yang dihapus tidak boleh lahir kembali dengan sendirinya.
+    expect(after.some((i) => i.id === items[2].id)).toBe(false);
+    expect((await planItems(planId)).some((i) => i.id === items[2].id)).toBe(false);
+  });
+
+  it("membuat rencana sekali pakai tanpa pernah menggandakannya", async () => {
+    // Persis penjaga yang dipakai skrip sekali pakai: cari nama yang sama di
+    // keluarga ini dulu; kalau ada, pakai yang itu alih-alih membuat kedua.
+    const name = "Belanja Bulanan Agustus 2026";
+    const plannedDate = toJakartaISODate();
+    expect(plannedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    async function ensurePlan(): Promise<{ id: string; created: boolean }> {
+      const { data: existing } = await db
+        .from("shopping_plans")
+        .select("id")
+        .eq("family_id", familyId)
+        .eq("name", name)
+        .limit(1)
+        .maybeSingle();
+      if (existing) return { id: existing.id, created: false };
+
+      const { data, error } = await db
+        .from("shopping_plans")
+        .insert({
+          family_id: familyId,
+          name,
+          planned_date: plannedDate,
+          status: "active",
+          created_by: actorId,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(`gagal membuat rencana: ${error.message}`);
+      await pasteIntoPlan(data!.id, DAFTAR_BULANAN);
+      return { id: data!.id, created: true };
+    }
+
+    const first = await ensurePlan();
+    expect(first.created).toBe(true);
+
+    const second = await ensurePlan();
+    expect(second.created).toBe(false);
+    expect(second.id).toBe(first.id);
+
+    const { count } = await db
+      .from("shopping_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", familyId)
+      .eq("name", name);
+    expect(count).toBe(1);
+
+    // Jalan kedua juga tidak boleh menambah barang ke rencana yang sudah ada.
+    expect(await planItems(first.id)).toHaveLength(37);
+
+    // Tanggalnya tanggal Asia/Jakarta, bukan tanggal UTC servernya.
+    const { data: plan } = await db
+      .from("shopping_plans")
+      .select("planned_date")
+      .eq("id", first.id)
+      .single();
+    expect(plan!.planned_date).toBe(plannedDate);
   });
 
   it("menyelesaikan checklist beserta barang tambahan menjadi SATU transaksi Belanja", async () => {

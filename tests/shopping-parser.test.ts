@@ -25,9 +25,17 @@ describe("tempel daftar belanja (pemisah koma)", () => {
     expect(items[0].qty).toBe(5);
   });
 
-  it("juga menerima daftar per baris dan titik koma", () => {
-    const items = parseShoppingList("Beras 5 kg\nGula 1 kg; Kopi");
+  it("juga menerima daftar per baris", () => {
+    const items = parseShoppingList("Beras 5 kg\nGula 1 kg\nKopi");
     expect(items.map((i) => i.name)).toEqual(["Beras", "Gula", "Kopi"]);
+  });
+
+  it("tidak memecah koma desimal maupun pemisah ribuan menjadi barang baru", () => {
+    const items = parseShoppingList("Beras 1,5 kg, Minyak 2 liter Rp 18,500");
+    expect(items).toEqual([
+      { name: "Beras", qty: 1.5, unit: "kg", price: 0 },
+      { name: "Minyak", qty: 2, unit: "liter", price: 18500 },
+    ]);
   });
 
   it("membaca harga dari @ maupun Rp, dengan pemisah ribuan", () => {
@@ -68,9 +76,9 @@ describe("tempel daftar belanja (pemisah koma)", () => {
   });
 });
 
-describe("tempel daftar gaya berpipa (Nama | qty | satuan)", () => {
-  it("membaca contoh format berpipa dari petunjuk di layar", () => {
-    const items = parseShoppingList("Beras | 5 | kg, Minyak Goreng | 2 | liter, Telur | 1 | kg");
+describe("tempel daftar gaya rapi (Nama ; jumlah ; satuan)", () => {
+  it("membaca contoh format rapi dari petunjuk di layar", () => {
+    const items = parseShoppingList("Beras ; 5 ; kg\nMinyak Goreng ; 2 ; liter\nTelur ; 1 ; kg");
 
     expect(items).toEqual([
       { name: "Beras", qty: 5, unit: "kg", price: 0 },
@@ -79,9 +87,26 @@ describe("tempel daftar gaya berpipa (Nama | qty | satuan)", () => {
     ]);
   });
 
+  it("membaca format rapi yang dipisahkan koma antar barang", () => {
+    const items = parseShoppingList("Beras ; 5 ; kg, Minyak Goreng ; 2 ; liter, Telur ; 1 ; kg");
+
+    expect(items).toEqual([
+      { name: "Beras", qty: 5, unit: "kg", price: 0 },
+      { name: "Minyak Goreng", qty: 2, unit: "liter", price: 0 },
+      { name: "Telur", qty: 1, unit: "kg", price: 0 },
+    ]);
+  });
+
+  it("membaca format rapi tanpa spasi di sekitar titik koma", () => {
+    expect(parseShoppingList("Beras;5;kg\nTepung Roti;200;gram")).toEqual([
+      { name: "Beras", qty: 5, unit: "kg", price: 0 },
+      { name: "Tepung Roti", qty: 200, unit: "gram", price: 0 },
+    ]);
+  });
+
   it("menerima kolom yang tidak lengkap tanpa menggagalkan barisnya", () => {
-    expect(parseShoppingLine("Beras | 5")).toEqual({ name: "Beras", qty: 5, unit: "", price: 0 });
-    expect(parseShoppingLine("Sabun mandi |")).toEqual({
+    expect(parseShoppingLine("Beras ; 5")).toEqual({ name: "Beras", qty: 5, unit: "", price: 0 });
+    expect(parseShoppingLine("Sabun mandi ;")).toEqual({
       name: "Sabun mandi",
       qty: 1,
       unit: "",
@@ -90,18 +115,18 @@ describe("tempel daftar gaya berpipa (Nama | qty | satuan)", () => {
   });
 
   it("membaca kolom keempat sebagai harga satuan", () => {
-    expect(parseShoppingLine("Beras | 5 | kg | 12000")).toEqual({
+    expect(parseShoppingLine("Beras ; 5 ; kg ; 12000")).toEqual({
       name: "Beras",
       qty: 5,
       unit: "kg",
       price: 12000,
     });
-    expect(parseShoppingLine("Beras | 5 | kg | Rp12.000")).toMatchObject({ price: 12000 });
+    expect(parseShoppingLine("Beras ; 5 ; kg ; Rp12.000")).toMatchObject({ price: 12000 });
   });
 
-  it("tidak mengupas angka dari nama barang pada gaya berpipa", () => {
+  it("tidak mengupas angka dari nama barang pada gaya rapi", () => {
     // "Minyak Goreng 2 L" memang nama produknya; jumlahnya ada di kolom sendiri.
-    expect(parseShoppingLine("Minyak Goreng 2 L | 1 | pcs")).toEqual({
+    expect(parseShoppingLine("Minyak Goreng 2 L ; 1 ; pcs")).toEqual({
       name: "Minyak Goreng 2 L",
       qty: 1,
       unit: "pcs",
@@ -109,8 +134,26 @@ describe("tempel daftar gaya berpipa (Nama | qty | satuan)", () => {
     });
   });
 
+  it("tetap memisahkan barang bila titik komanya jelas bukan pemisah kolom", () => {
+    // Kebiasaan lama: titik koma dipakai antar barang, bukan antar kolom.
+    const items = parseShoppingList("Beras 5 kg; Gula 1 kg; Kopi");
+    expect(items).toEqual([
+      { name: "Beras", qty: 5, unit: "kg", price: 0 },
+      { name: "Gula", qty: 1, unit: "kg", price: 0 },
+      { name: "Kopi", qty: 1, unit: "", price: 0 },
+    ]);
+  });
+
+  it("membaca beberapa barang bergaya rapi yang menumpuk di satu baris", () => {
+    const items = parseShoppingList("Beras ; 5 ; kg; Gula ; 1 ; kg");
+    expect(items).toEqual([
+      { name: "Beras", qty: 5, unit: "kg", price: 0 },
+      { name: "Gula", qty: 1, unit: "kg", price: 0 },
+    ]);
+  });
+
   it("membiarkan kedua gaya bercampur dalam satu tempelan, termasuk per baris", () => {
-    const items = parseShoppingList("Beras | 5 | kg\nMinyak goreng 2 liter, Telur");
+    const items = parseShoppingList("Beras ; 5 ; kg\nMinyak goreng 2 liter, Telur");
     expect(items).toEqual([
       { name: "Beras", qty: 5, unit: "kg", price: 0 },
       { name: "Minyak goreng", qty: 2, unit: "liter", price: 0 },
@@ -128,6 +171,32 @@ describe("tempel daftar gaya berpipa (Nama | qty | satuan)", () => {
   it("tetap membedakan barang bernama sama dengan satuan berbeda", () => {
     const items = parseShoppingList("Susu 2 kotak, Susu 1 liter");
     expect(items).toHaveLength(2);
+  });
+
+  it("membaca daftar belanja bulanan sungguhan apa adanya", () => {
+    // Potongan daftar yang benar-benar ditempel Mamah: satuan campur, nama
+    // panjang, dan angka besar seperti "275 ml" tidak boleh berubah.
+    const items = parseShoppingList(
+      [
+        "Minyak Goreng ; 2 ; liter",
+        "Indomie Ayam Bawang ; 3 ; pcs",
+        "Tepung Roti ; 200 ; gram",
+        "Kecap Manis ; 275 ; ml",
+        "Sarden ; 2 ; kaleng",
+        "Mie Gelas ; 1 ; pack",
+        "Sikat Gigi Ortu ; 3 ; buah",
+      ].join("\n")
+    );
+
+    expect(items).toEqual([
+      { name: "Minyak Goreng", qty: 2, unit: "liter", price: 0 },
+      { name: "Indomie Ayam Bawang", qty: 3, unit: "pcs", price: 0 },
+      { name: "Tepung Roti", qty: 200, unit: "gram", price: 0 },
+      { name: "Kecap Manis", qty: 275, unit: "ml", price: 0 },
+      { name: "Sarden", qty: 2, unit: "kaleng", price: 0 },
+      { name: "Mie Gelas", qty: 1, unit: "pack", price: 0 },
+      { name: "Sikat Gigi Ortu", qty: 3, unit: "buah", price: 0 },
+    ]);
   });
 });
 

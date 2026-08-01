@@ -3,12 +3,17 @@
  *
  * Ayah/Mamah menempel daftar dari WhatsApp/Notes dalam dua gaya:
  *
- *   bebas      Beras 5 kg, Minyak goreng 2 liter, Telur 1 kg, Sabun mandi
- *   berpipa    Beras | 5 | kg, Minyak Goreng | 2 | liter, Telur | 1 | kg
+ *   rapi    Beras ; 5 ; kg
+ *   bebas   Beras 5 kg
  *
- * Keduanya didukung dan boleh bercampur dalam satu tempelan. Pemisah antar
- * barang adalah koma, titik koma, atau baris baru; pemisah antar kolom pada
- * gaya berpipa adalah "|".
+ * Keduanya didukung dan boleh bercampur dalam satu tempelan.
+ *
+ *   pemisah KOLOM   titik koma  →  Nama ; jumlah ; satuan ; harga
+ *   pemisah BARANG  baris baru atau koma
+ *
+ * Titik koma yang jelas-jelas memisahkan barang (potongan sesudahnya bukan
+ * angka, satuan, atau harga) tetap dibaca sebagai pemisah barang, supaya
+ * "Beras 5 kg; Gula 1 kg" tidak menyatu jadi satu baris.
  *
  * Fungsi ini murni (tanpa DB/DOM) supaya bisa diuji langsung dan dipakai di
  * klien tanpa round-trip ke server.
@@ -39,8 +44,23 @@ const LEADING_QTY_RE = /^(\d+(?:[.,]\d+)?)\s*(?:x|×)\s*/i;
 /** "Telur 2" — angka polos di akhir dianggap kuantitas. */
 const TRAILING_QTY_RE = /\s(\d+(?:[.,]\d+)?)$/;
 
-/** Angka polos, dipakai untuk kolom qty pada gaya berpipa. */
+/** Angka polos, dipakai untuk kolom jumlah pada gaya rapi. */
 const PLAIN_NUMBER_RE = /^\d+(?:[.,]\d+)?$/;
+
+/** Potongan yang seluruhnya satuan ("kg"), jumlah+satuan ("5 kg"), atau harga. */
+const UNIT_ONLY_RE = new RegExp(String.raw`^(?:${UNIT_PATTERN})$`, "i");
+const QTY_UNIT_ONLY_RE = new RegExp(String.raw`^\d+(?:[.,]\d+)?\s*(?:${UNIT_PATTERN})$`, "i");
+const PRICE_ONLY_RE = new RegExp(String.raw`^(?:@|rp\.?)\s*\d[\d.,]*$`, "i");
+
+/**
+ * Pemisah antar barang: baris baru, atau koma yang BUKAN pemisah desimal.
+ *
+ * Koma yang langsung diapit angka ("1,5 kg", "Rp 18,500") adalah bagian dari
+ * bilangan — memecahnya di situ akan mengubah "Beras 1,5 kg" menjadi dua
+ * barang omong kosong. Sengaja hanya memakai lookahead (bukan lookbehind)
+ * agar tetap jalan di Safari lama.
+ */
+const ITEM_SEPARATOR_RE = /[\n\r]+|,(?!\d)/;
 
 function toNumber(raw: string): number {
   // Buang pemisah ribuan (titik/koma) lalu kembalikan desimal koma jadi titik.
@@ -57,15 +77,45 @@ function tidy(value: string): string {
     .trim();
 }
 
+/** Potongan ini terbaca sebagai KOLOM milik barang sebelumnya, bukan nama baru. */
+function isColumnToken(part: string): boolean {
+  return (
+    PLAIN_NUMBER_RE.test(part) ||
+    UNIT_ONLY_RE.test(part) ||
+    QTY_UNIT_ONLY_RE.test(part) ||
+    PRICE_ONLY_RE.test(part)
+  );
+}
+
 /**
- * Gaya berpipa: `Nama | qty | satuan | harga`.
+ * Kelompokkan potongan hasil pecahan titik koma menjadi barang-barang.
  *
- * Kolom setelah nama boleh dipotong di mana saja — `Beras | 5` dan
- * `Beras | 5 | kg` sama-sama sah. Kolom yang tak dikenali diabaikan alih-alih
+ * Potongan yang berupa kolom (angka, satuan, harga) menempel pada barang
+ * terakhir; potongan lain memulai barang baru. Dengan begitu satu baris bisa
+ * berisi `Beras ; 5 ; kg` (satu barang, tiga kolom) maupun
+ * `Beras 5 kg; Gula 1 kg` (dua barang) tanpa perlu ditebak pengguna.
+ */
+function groupColumns(raw: string): string[][] {
+  const groups: string[][] = [];
+
+  for (const part of raw.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (groups.length === 0 || !isColumnToken(trimmed)) groups.push([trimmed]);
+    else groups[groups.length - 1].push(trimmed);
+  }
+
+  return groups;
+}
+
+/**
+ * Gaya rapi: `Nama ; jumlah ; satuan ; harga`.
+ *
+ * Kolom setelah nama boleh dipotong di mana saja — `Beras ; 5` dan
+ * `Beras ; 5 ; kg` sama-sama sah. Kolom yang tak dikenali diabaikan alih-alih
  * menggagalkan barisnya, karena daftar yang ditempel jarang rapi sempurna.
  */
-function parsePipedLine(raw: string): ParsedShoppingItem | null {
-  const columns = raw.split("|").map((part) => part.trim());
+function parseColumns(columns: string[]): ParsedShoppingItem | null {
   const name = normalizeItemName(tidy(columns[0] ?? ""));
   if (!name) return null;
 
@@ -74,15 +124,13 @@ function parsePipedLine(raw: string): ParsedShoppingItem | null {
   let price = 0;
 
   for (const column of columns.slice(1)) {
-    if (!column) continue;
-
     const priceMatch = column.match(PRICE_RE);
     if (priceMatch) {
       price = Math.round(toNumber(priceMatch[1]));
       continue;
     }
-    // Angka polos: yang pertama adalah qty, yang berikutnya harga —
-    // itulah urutan kolom `Nama | qty | satuan | harga`.
+    // Angka polos: yang pertama adalah jumlah, yang berikutnya harga —
+    // itulah urutan kolom `Nama ; jumlah ; satuan ; harga`.
     if (PLAIN_NUMBER_RE.test(column)) {
       const value = toNumber(column);
       if (!qty) qty = value;
@@ -102,13 +150,8 @@ function parsePipedLine(raw: string): ParsedShoppingItem | null {
   return { name, qty: qty > 0 ? qty : 1, unit, price: price > 0 ? price : 0 };
 }
 
-/**
- * Pecah satu potongan teks menjadi satu barang.
- * Mengembalikan null bila potongan itu kosong setelah dirapikan.
- */
-export function parseShoppingLine(raw: string): ParsedShoppingItem | null {
-  if (raw.includes("|")) return parsePipedLine(raw);
-
+/** Gaya bebas: "Beras 5 kg", "2x Susu", "Telur 3", "Sabun mandi". */
+function parseFreeform(raw: string): ParsedShoppingItem | null {
   let rest = raw.replace(/\s+/g, " ").trim();
   if (!rest) return null;
 
@@ -153,11 +196,33 @@ export function parseShoppingLine(raw: string): ParsedShoppingItem | null {
 }
 
 /**
+ * Baca satu potongan teks. Biasanya satu barang, tetapi bisa lebih bila
+ * titik komanya ternyata memisahkan barang, bukan kolom.
+ */
+export function parseShoppingChunk(raw: string): ParsedShoppingItem[] {
+  const items: ParsedShoppingItem[] = [];
+
+  for (const group of groupColumns(raw)) {
+    const item = group.length > 1 ? parseColumns(group) : parseFreeform(group[0]);
+    if (item) items.push(item);
+  }
+
+  return items;
+}
+
+/**
+ * Pecah satu potongan teks menjadi satu barang.
+ * Mengembalikan null bila potongan itu kosong setelah dirapikan.
+ */
+export function parseShoppingLine(raw: string): ParsedShoppingItem | null {
+  return parseShoppingChunk(raw)[0] ?? null;
+}
+
+/**
  * Pecah teks panjang menjadi daftar barang.
  *
- * Pemisah utama adalah KOMA (sesuai cara pengguna menulis), ditambah baris
- * baru dan titik koma supaya daftar yang disalin per baris juga bekerja.
- * Potongan kosong diabaikan, spasi berlebih dibuang.
+ * Pemisah antar barang adalah BARIS BARU atau KOMA (sesuai cara pengguna
+ * menulis). Potongan kosong diabaikan, spasi berlebih dibuang.
  *
  * Barang yang identik (nama + satuan sama, tanpa membedakan huruf besar)
  * DIGABUNG dan kuantitasnya dijumlahkan — menempel daftar yang sama dua kali
@@ -169,20 +234,19 @@ export function parseShoppingList(text: string, limit = 100): ParsedShoppingItem
 
   const merged = new Map<string, ParsedShoppingItem>();
 
-  for (const chunk of text.split(/[,;\n\r]+/)) {
-    const item = parseShoppingLine(chunk);
-    if (!item) continue;
+  for (const chunk of text.split(ITEM_SEPARATOR_RE)) {
+    for (const item of parseShoppingChunk(chunk)) {
+      const key = itemKey(item.name, item.unit);
+      const existing = merged.get(key);
+      if (existing) {
+        existing.qty = Number((existing.qty + item.qty).toFixed(2));
+        if (existing.price === 0) existing.price = item.price;
+        continue;
+      }
 
-    const key = itemKey(item.name, item.unit);
-    const existing = merged.get(key);
-    if (existing) {
-      existing.qty = Number((existing.qty + item.qty).toFixed(2));
-      if (existing.price === 0) existing.price = item.price;
-      continue;
+      merged.set(key, item);
+      if (merged.size >= limit) return Array.from(merged.values());
     }
-
-    merged.set(key, item);
-    if (merged.size >= limit) break;
   }
 
   return Array.from(merged.values());

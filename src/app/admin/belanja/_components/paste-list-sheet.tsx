@@ -20,7 +20,7 @@ import { formatRupiah } from "@/lib/format";
 import { MAX_ITEM_NAME_LENGTH, formatQtyValue, itemKey } from "@/lib/shopping-item";
 import { cn } from "@/lib/utils";
 
-const CONTOH_BERPIPA = "Beras | 5 | kg, Minyak Goreng | 2 | liter, Telur | 1 | kg";
+const CONTOH_RAPI = "Beras ; 5 ; kg\nMinyak Goreng ; 2 ; liter\nTelur ; 1 ; kg";
 const CONTOH_BEBAS = "Beras 5 kg, Minyak goreng 2 liter, Telur 1 kg, Sabun mandi";
 
 interface DraftRow {
@@ -37,8 +37,8 @@ interface DraftRow {
 /**
  * Tempel daftar belanja dari teks panjang.
  *
- * Teks dipecah per koma (juga per baris dan titik koma) dan mengerti dua gaya
- * penulisan sekaligus: `Nama | qty | satuan` dan gaya bebas `Beras 5 kg`.
+ * Teks dipecah per baris atau per koma dan mengerti dua gaya penulisan
+ * sekaligus: `Nama ; jumlah ; satuan` dan gaya bebas `Beras 5 kg`.
  * Hasilnya SELALU melewati layar pratinjau — nama, jumlah, satuan, dan harga
  * bisa diperbaiki sebelum disimpan; tidak ada yang langsung masuk.
  *
@@ -163,7 +163,7 @@ export function PasteListSheet({
                 onChange={(e) => setText(e.target.value)}
                 rows={6}
                 autoFocus
-                placeholder={`${CONTOH_BERPIPA}\natau\n${CONTOH_BEBAS}`}
+                placeholder={`${CONTOH_RAPI}\n\natau\n\n${CONTOH_BEBAS}`}
                 className="min-h-[140px] rounded-xl border-2"
               />
             </div>
@@ -174,10 +174,10 @@ export function PasteListSheet({
               </p>
 
               <FormatExample
-                title="Rapi: Nama | jumlah | satuan"
-                example={CONTOH_BERPIPA}
+                title="Rapi: Nama ; jumlah ; satuan"
+                example={CONTOH_RAPI}
                 hint="Paling akurat. Kolom keempat boleh diisi harga satuan."
-                onUse={() => setText(CONTOH_BERPIPA)}
+                onUse={() => setText(CONTOH_RAPI)}
               />
               <FormatExample
                 title="Bebas: seperti menulis di WhatsApp"
@@ -187,7 +187,7 @@ export function PasteListSheet({
               />
 
               <p className="text-[11px] font-semibold leading-relaxed text-ink-3">
-                Pemisah antar barang: koma, titik koma, atau baris baru. Harga boleh ditulis
+                Pemisah antar barang: baris baru atau koma. Harga boleh ditulis
                 <span className="font-black text-ink-2"> @12.000</span> atau
                 <span className="font-black text-ink-2"> Rp12.000</span>. Barang kosong diabaikan.
               </p>
@@ -323,7 +323,11 @@ function FormatExample({
       className="block w-full rounded-xl bg-card px-3 py-2.5 text-left transition-colors active:bg-primary-light"
     >
       <p className="text-[11px] font-black text-ink-2">{title}</p>
-      <p className="mt-0.5 break-words font-mono text-[11px] font-semibold text-ink-1">{example}</p>
+      {/* whitespace-pre-line: contoh gaya rapi ditulis satu barang per baris,
+          persis seperti yang akan ditempel pengguna. */}
+      <p className="mt-0.5 whitespace-pre-line break-words font-mono text-[11px] font-semibold leading-snug text-ink-1">
+        {example}
+      </p>
       <p className="mt-1 text-[10.5px] font-semibold text-ink-3">{hint}</p>
     </button>
   );
