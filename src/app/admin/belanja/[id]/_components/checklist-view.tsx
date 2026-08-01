@@ -1,22 +1,27 @@
 "use client";
 
-import { useMemo, useOptimistic, useState, useTransition } from "react";
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useOptimistic,
+  useState,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Check,
-  ChevronDown,
   ChevronLeft,
   Focus,
   Layers,
   Lightbulb,
-  Minus,
   Pencil,
   Plus,
+  Search,
   Sparkles,
-  Trash2,
-  Undo2,
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -29,7 +34,6 @@ import { CompleteSheet } from "./complete-sheet";
 import {
   addPlanItem,
   deletePlanItem,
-  setPlanItemQty,
   setPlanItemStatus,
   type PlanItemView,
   type PlanView,
@@ -37,8 +41,12 @@ import {
 import type { FinanceSummary } from "@/app/actions/keuangan";
 import type { ShoppingPlanItemStatus } from "@/lib/supabase/types";
 import { formatDate, formatRupiah } from "@/lib/format";
-import { formatQtyValue } from "@/lib/shopping-item";
-import { groupByCategory, type ShoppingCategory } from "@/lib/shopping-category";
+import {
+  groupByCategory,
+  SHOPPING_CATEGORY_LABELS,
+  type ShoppingCategory,
+} from "@/lib/shopping-category";
+import { buildHaystack, matchesQuery, normalizeSearchText } from "@/lib/shopping-search";
 import { parseShoppingLine } from "@/lib/shopping-parser";
 import { useWakeLock } from "@/lib/use-wake-lock";
 import { cn } from "@/lib/utils";
@@ -85,10 +93,18 @@ export function ChecklistView({
 }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("semua");
+  const [query, setQuery] = useState("");
   const [grouped, setGrouped] = useState(false);
   const [focus, setFocus] = useState(false);
   const [, startTransition] = useTransition();
   const wakeLock = useWakeLock();
+
+  // Pencarian lokal: yang mahal bukan pengetikannya melainkan penyaringan
+  // ulang, jadi kueri di-defer supaya huruf yang diketik tetap muncul seketika
+  // sementara daftar menyusul di render berprioritas rendah. Efeknya sama
+  // dengan debounce tetapi tanpa timer yang harus dibersihkan, dan tanpa jeda
+  // buatan pada daftar pendek.
+  const deferredQuery = useDeferredValue(query);
 
   const [items, applyOptimistic] = useOptimistic(
     plan.items,
@@ -106,12 +122,32 @@ export function ChecklistView({
   // selama mode itu aktif, supaya tidak ada dua sakelar yang saling menimpa.
   const effectiveFilter: Filter = focus ? "belum" : filter;
 
+  // Teks pencarian dibangun SEKALI per daftar, bukan sekali per ketukan
+  // tombol: inilah bagian yang benar-benar mahal untuk 100 barang.
+  const haystacks = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of items) {
+      map.set(
+        item.id,
+        buildHaystack({
+          name: item.name,
+          qty: item.qty,
+          unit: item.unit,
+          categoryLabel: SHOPPING_CATEGORY_LABELS[item.category],
+        })
+      );
+    }
+    return map;
+  }, [items]);
+
+  const searching = normalizeSearchText(deferredQuery).length > 0;
+
   const visible = useMemo(() => {
     const filtered = items.filter((item) => {
-      if (effectiveFilter === "belum") return item.status === "pending";
-      if (effectiveFilter === "sudah") return item.status === "bought";
-      if (effectiveFilter === "batal") return item.status === "cancelled";
-      return true;
+      if (effectiveFilter === "belum" && item.status !== "pending") return false;
+      if (effectiveFilter === "sudah" && item.status !== "bought") return false;
+      if (effectiveFilter === "batal" && item.status !== "cancelled") return false;
+      return matchesQuery(haystacks.get(item.id) ?? "", deferredQuery);
     });
     // Barang selesai/dibatalkan turun ke bawah; urutan asli dipertahankan
     // di dalam masing-masing kelompok.
@@ -124,7 +160,7 @@ export function ChecklistView({
         return diff !== 0 ? diff : a.index - b.index;
       })
       .map((entry) => entry.item);
-  }, [items, effectiveFilter]);
+  }, [items, effectiveFilter, deferredQuery, haystacks]);
 
   const sections = useMemo(
     () =>
@@ -134,33 +170,50 @@ export function ChecklistView({
     [grouped, visible]
   );
 
-  const mutate = (
-    patch: { id: string; status?: ShoppingPlanItemStatus; qty?: number },
-    run: () => Promise<{ success: boolean; error?: string }>
-  ) => {
-    startTransition(async () => {
-      applyOptimistic(patch);
-      const result = await run();
-      if (!result.success) toast.error(result.error ?? "Gagal memperbarui checklist.");
-      router.refresh();
-    });
-  };
+  // Ketiga penangan di bawah SENGAJA dibungkus useCallback: `ChecklistRow`
+  // memakai `memo`, dan fungsi yang dibuat ulang setiap render akan membatalkan
+  // seluruh manfaatnya — 100 baris ikut merender ulang setiap satu centang.
+  const mutate = useCallback(
+    (
+      patch: { id: string; status?: ShoppingPlanItemStatus; qty?: number },
+      run: () => Promise<{ success: boolean; error?: string }>
+    ) => {
+      startTransition(async () => {
+        applyOptimistic(patch);
+        const result = await run();
+        if (!result.success) toast.error(result.error ?? "Gagal memperbarui checklist.");
+        router.refresh();
+      });
+    },
+    [applyOptimistic, router, startTransition]
+  );
 
-  const toggle = (item: PlanItemView) => {
-    const next: ShoppingPlanItemStatus = item.status === "bought" ? "pending" : "bought";
-    mutate({ id: item.id, status: next }, () => setPlanItemStatus(item.id, next));
-  };
+  const toggle = useCallback(
+    (item: PlanItemView) => {
+      const next: ShoppingPlanItemStatus = item.status === "bought" ? "pending" : "bought";
+      mutate({ id: item.id, status: next }, () => setPlanItemStatus(item.id, next));
+    },
+    [mutate]
+  );
 
-  const cancel = (item: PlanItemView) => {
-    const next: ShoppingPlanItemStatus = item.status === "cancelled" ? "pending" : "cancelled";
-    mutate({ id: item.id, status: next }, () => setPlanItemStatus(item.id, next));
-  };
+  const cancel = useCallback(
+    (item: PlanItemView) => {
+      const next: ShoppingPlanItemStatus = item.status === "cancelled" ? "pending" : "cancelled";
+      mutate({ id: item.id, status: next }, () => setPlanItemStatus(item.id, next));
+    },
+    [mutate]
+  );
 
-  const changeQty = (item: PlanItemView, delta: number) => {
-    const next = Math.max(1, Number((item.qty + delta).toFixed(2)));
-    if (next === item.qty) return;
-    mutate({ id: item.id, qty: next }, () => setPlanItemQty(item.id, next));
-  };
+  const remove = useCallback(
+    (item: PlanItemView) => {
+      startTransition(async () => {
+        const result = await deletePlanItem(item.id);
+        if (!result.success) toast.error(result.error ?? "Gagal menghapus barang.");
+        router.refresh();
+      });
+    },
+    [router, startTransition]
+  );
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-5">
@@ -219,6 +272,37 @@ export function ChecklistView({
               sering ditekan sambil mendorong troli. Filter dipakai sekali di
               awal, jadi cukup berada di kepala daftar. */}
           <div className="space-y-2 border-b border-border bg-card px-3 py-2.5 sm:px-4">
+            {/* Pencarian berada di ATAS filter: menyaring 100 barang menjadi
+                satu adalah cara tercepat menemukan sesuatu di depan rak, dan
+                menaruhnya di bawah chip filter membuatnya terlewat. */}
+            <div className="relative">
+              <Search
+                aria-hidden
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3"
+              />
+              <Input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                maxLength={60}
+                autoComplete="off"
+                enterKeyHint="search"
+                placeholder="Cari nama, jumlah, satuan, kategori…"
+                aria-label="Cari barang di checklist"
+                className="pl-9 pr-10"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Hapus pencarian"
+                  className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-ink-3 transition-transform duration-150 active:scale-90"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center gap-1.5">
               {FILTERS.map((option) => (
                 <button
@@ -270,15 +354,32 @@ export function ChecklistView({
           </div>
 
           {visible.length === 0 ? (
-            <div className="p-3 sm:p-4">
+            <div className="space-y-3 p-3 sm:p-4">
               <EmptyState
-                title={items.length === 0 ? "Daftar masih kosong" : "Tidak ada barang di filter ini"}
+                title={
+                  items.length === 0
+                    ? "Daftar masih kosong"
+                    : searching
+                      ? `Tidak ada barang cocok "${deferredQuery.trim()}"`
+                      : "Tidak ada barang di filter ini"
+                }
                 text={
                   items.length === 0
                     ? "Tempel daftar belanja dari WhatsApp, pakai Barang Pintar, atau tambah satu per satu."
-                    : "Coba pilih filter lain."
+                    : searching
+                      ? "Coba kata kunci lain, atau hapus pencarian untuk melihat seluruh daftar."
+                      : "Coba pilih filter lain."
                 }
               />
+              {searching && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="tap-target mx-auto flex items-center gap-1.5 rounded-xl border-2 border-border bg-card px-3.5 text-[13px] font-black text-ink-2 transition-transform duration-150 active:scale-95"
+                >
+                  <X className="h-4 w-4" aria-hidden /> Hapus pencarian
+                </button>
+              )}
             </div>
           ) : (
             <div className="px-3 sm:px-4">
@@ -297,16 +398,9 @@ export function ChecklistView({
                         item={item}
                         locked={locked}
                         focus={focus}
-                        onToggle={() => toggle(item)}
-                        onCancel={() => cancel(item)}
-                        onQty={(delta) => changeQty(item, delta)}
-                        onDelete={() =>
-                          startTransition(async () => {
-                            const result = await deletePlanItem(item.id);
-                            if (!result.success) toast.error(result.error ?? "Gagal menghapus barang.");
-                            router.refresh();
-                          })
-                        }
+                        onToggle={toggle}
+                        onCancel={cancel}
+                        onDelete={remove}
                       />
                     ))}
                   </ul>
@@ -440,48 +534,67 @@ function PriceComparison({ plan, items }: { plan: PlanView; items: PlanItemView[
 }
 
 /**
- * Satu baris ringkas.
+ * Keterangan harga satu baris, dalam mode tampil.
  *
- * Yang terbaca lebih dulu adalah NAMA barang; jumlah & satuannya duduk sebagai
- * lencana "5 kg" di ujung kanan nama — bukan angka kecil di baris kedua yang
- * mengambang tanpa konteks. Kotak centang 48px tetap di kiri karena itulah
- * satu-satunya tombol yang ditekan berulang kali sambil mendorong troli.
- *
- * Ubah, batalkan, dan hapus SENGAJA tidak ikut tampil di baris: ketiganya
- * jarang dipakai dan hanya mempersempit ruang nama. Menekan barisnya membuka
- * laci berisi pengatur jumlah dan ketiga aksi itu.
- *
- * Pada mode fokus laci itu dinonaktifkan dan barisnya membesar: di depan rak
- * yang dibutuhkan hanya nama, jumlah, dan kotak centang yang mudah dikenai.
+ * Harga AKTUAL selalu menang atas perkiraan: begitu angka dari kasir masuk,
+ * itulah kebenaran barisnya. Barang yang belum berharga menulis "Belum diisi"
+ * secara eksplisit — lebih jujur daripada Rp0, yang terbaca seperti gratis.
  */
-function ChecklistRow({
+function priceMeta(item: PlanItemView): string {
+  const parts: string[] = [];
+
+  if (item.actualPrice !== null) {
+    parts.push(`${formatRupiah(item.actualPrice)}/satuan`, formatRupiah(item.actualSubtotal));
+  } else if (item.estimatedPrice > 0) {
+    parts.push(
+      `perkiraan ${formatRupiah(item.estimatedPrice)}/satuan`,
+      formatRupiah(item.estimatedSubtotal)
+    );
+  } else {
+    parts.push("Harga belum diisi");
+  }
+
+  if (item.status === "cancelled") parts.push("tidak jadi dibeli");
+  return parts.join(" · ");
+}
+
+/**
+ * Satu baris ringkas — bentuknya meniru checklist Notes/Reminders di iPhone.
+ *
+ * Seluruh isi baris terbaca TANPA membuka apa pun: nama, jumlah + satuan,
+ * harga satuan, dan subtotal. Sebelumnya harga hanya muncul setelah barisnya
+ * ditekan, sehingga memeriksa belanjaan berarti membuka 100 laci satu per satu.
+ *
+ * Tata letaknya tiga zona tetap:
+ *
+ *   [ centang 48px ] [ nama + jumlah + harga ] [ ikon ubah 44px ]
+ *
+ * Keduanya adalah tombol BERSEBELAHAN, bukan tombol di dalam tombol — itulah
+ * yang menjamin menekan ikon ubah tidak pernah ikut mencentang barang, dan
+ * mencentang tidak pernah membuka editor. Tidak ada laci lagi: mengubah
+ * jumlah, membatalkan, dan menghapus semuanya hidup di dalam panel Ubah,
+ * sehingga barisnya tinggal satu keadaan saja.
+ *
+ * Dibungkus `memo` supaya menyunting satu barang hanya merender ulang barisnya
+ * sendiri; 99 baris lain tidak ikut berubah karena props-nya identik.
+ */
+const ChecklistRow = memo(function ChecklistRow({
   item,
   locked,
   focus,
   onToggle,
   onCancel,
-  onQty,
   onDelete,
 }: {
   item: PlanItemView;
   locked: boolean;
   focus: boolean;
-  onToggle: () => void;
-  onCancel: () => void;
-  onQty: (delta: number) => void;
-  onDelete: () => void;
+  onToggle: (item: PlanItemView) => void;
+  onCancel: (item: PlanItemView) => void;
+  onDelete: (item: PlanItemView) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const done = item.status === "bought";
   const cancelled = item.status === "cancelled";
-
-  const meta = [
-    item.estimatedPrice > 0 ? `${formatRupiah(item.estimatedPrice)} / satuan` : null,
-    item.estimatedPrice > 0 ? formatRupiah(item.estimatedSubtotal) : null,
-    cancelled ? "tidak jadi dibeli" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   return (
     // scroll-mt menjaga baris tidak berhenti tepat di bawah header yang
@@ -491,7 +604,7 @@ function ChecklistRow({
         <button
           type="button"
           disabled={locked || cancelled}
-          onClick={onToggle}
+          onClick={() => onToggle(item)}
           aria-pressed={done}
           aria-label={`${done ? "Batal tandai" : "Tandai sudah dibeli"}: ${item.name}`}
           className={cn(
@@ -508,123 +621,39 @@ function ChecklistRow({
           <Check className={focus ? "h-7 w-7" : "h-6 w-6"} strokeWidth={3} aria-hidden />
         </button>
 
-        {focus ? (
-          <div className="min-w-0 flex-1 py-1">
-            <ItemLine
-              name={item.name}
-              qty={item.qty}
-              unit={item.unit}
-              state={done ? "done" : cancelled ? "cancelled" : "default"}
-              className="[&_p]:text-[17px]"
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            aria-expanded={expanded}
-            aria-label={`Pilihan untuk ${item.name}`}
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl py-1.5 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ItemLine
-              className="flex-1"
-              name={item.name}
-              qty={item.qty}
-              unit={item.unit}
-              meta={meta || undefined}
-              state={done ? "done" : cancelled ? "cancelled" : "default"}
-            />
-            <ChevronDown
-              aria-hidden
-              className={cn(
-                "h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200",
-                expanded && "rotate-180"
-              )}
-            />
-          </button>
+        <div className="min-w-0 flex-1 py-1">
+          <ItemLine
+            name={item.name}
+            qty={item.qty}
+            unit={item.unit}
+            // Mode fokus di depan rak hanya butuh nama + jumlah; harga justru
+            // memperkecil target sentuh tanpa menambah keputusan apa pun.
+            meta={focus ? undefined : priceMeta(item)}
+            state={done ? "done" : cancelled ? "cancelled" : "default"}
+            className={focus ? "[&_p]:text-[17px]" : undefined}
+          />
+        </div>
+
+        {!locked && !focus && (
+          <ItemEditSheet
+            item={item}
+            onCancelItem={() => onCancel(item)}
+            onDeleteItem={() => onDelete(item)}
+            trigger={
+              <button
+                type="button"
+                aria-label={`Ubah ${item.name}`}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-ink-3 transition-[transform,background-color,color] duration-150 active:scale-90 active:bg-surface-2 active:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Pencil className="h-4 w-4" aria-hidden />
+              </button>
+            }
+          />
         )}
       </div>
-
-      {expanded && !focus && (
-        <div className="flex flex-wrap items-center gap-2 pb-3 pl-14 pr-1">
-          {!locked && (
-            <div className="flex items-center gap-1 rounded-xl bg-surface-2 p-1">
-              <button
-                type="button"
-                onClick={() => onQty(-1)}
-                aria-label={`Kurangi jumlah ${item.name}`}
-                className="grid h-9 w-9 place-items-center rounded-lg bg-card text-ink-2 shadow-sm transition-transform duration-150 active:scale-90"
-              >
-                <Minus className="h-4 w-4" aria-hidden />
-              </button>
-              <span className="tabular min-w-[3rem] text-center text-sm font-black text-ink-1">
-                {formatQtyValue(item.qty)}
-                {item.unit ? <span className="text-[11px] text-ink-3"> {item.unit}</span> : null}
-              </span>
-              <button
-                type="button"
-                onClick={() => onQty(1)}
-                aria-label={`Tambah jumlah ${item.name}`}
-                className="grid h-9 w-9 place-items-center rounded-lg bg-card text-ink-2 shadow-sm transition-transform duration-150 active:scale-90"
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
-          )}
-
-          {!locked && (
-            <ItemEditSheet
-              item={item}
-              trigger={
-                <button
-                  type="button"
-                  className="tap-target flex items-center gap-1 rounded-xl border-2 border-border bg-card px-3 text-xs font-black text-ink-2 transition-transform duration-150 active:scale-95"
-                >
-                  <Pencil className="h-3.5 w-3.5" aria-hidden /> Ubah
-                </button>
-              }
-            />
-          )}
-
-          {!locked && (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="tap-target flex items-center gap-1 rounded-xl border-2 border-border bg-card px-3 text-xs font-black text-ink-2 transition-transform duration-150 active:scale-95"
-            >
-              {cancelled ? (
-                <>
-                  <Undo2 className="h-3.5 w-3.5" aria-hidden /> Kembalikan
-                </>
-              ) : (
-                <>
-                  <X className="h-3.5 w-3.5" aria-hidden /> Tidak jadi
-                </>
-              )}
-            </button>
-          )}
-
-          {!locked && (
-            <button
-              type="button"
-              onClick={onDelete}
-              aria-label={`Hapus ${item.name} dari daftar`}
-              className="tap-target ml-auto grid place-items-center rounded-xl text-destructive transition-transform duration-150 active:scale-90 active:bg-destructive/10"
-            >
-              <Trash2 className="h-4 w-4" aria-hidden />
-            </button>
-          )}
-
-          {locked && (
-            <p className="text-[11px] font-semibold text-ink-3">
-              Rencana sudah diselesaikan — barang tidak bisa diubah lagi.
-            </p>
-          )}
-        </div>
-      )}
     </li>
   );
-}
+});
 
 /**
  * Tambah barang mendadak saat sudah berada di toko.

@@ -13,10 +13,10 @@ import {
   type ActionResult,
 } from "@/lib/server/finance-helpers";
 import { createShoppingTransaction } from "@/app/actions/belanja";
-import { distributeTotal } from "@/lib/shopping-total";
+import { computeReceiptTotals, toTransactionItems } from "@/lib/shopping-receipt";
 import { MAX_ITEM_NAME_LENGTH, normalizeItemName, normalizeUnit } from "@/lib/shopping-item";
 import { isShoppingCategory, resolveItemCategory, type ShoppingCategory } from "@/lib/shopping-category";
-import { formatMonthLabel } from "@/lib/format";
+import { formatMonthLabel, formatRupiah } from "@/lib/format";
 import type { ShoppingPlanStatus, ShoppingPlanItemStatus } from "@/lib/supabase/types";
 
 // ---------------------------------------------------------------------------
@@ -445,6 +445,13 @@ export interface PlanItemMutationInput {
   estimatedPrice: number;
   /** Satuan barang. Disimpan di kolom `note` (belum ada kolom `unit`). */
   unit?: string;
+  /**
+   * Harga satuan sebenarnya dari kasir.
+   *
+   * `undefined` = jangan disentuh (mis. pemanggil lama yang hanya mengubah
+   * nama). `null` = kosongkan kembali. Angka = simpan apa adanya.
+   */
+  actualPrice?: number | null;
 }
 
 function validateItem(input: PlanItemMutationInput): string | null {
@@ -457,6 +464,11 @@ function validateItem(input: PlanItemMutationInput): string | null {
 
   const price = toRupiah(input.estimatedPrice);
   if (!Number.isFinite(price) || price < 0) return "Estimasi harga tidak valid.";
+
+  if (input.actualPrice !== undefined && input.actualPrice !== null) {
+    const actual = toRupiah(input.actualPrice);
+    if (!Number.isFinite(actual) || actual < 0) return "Harga aktual tidak valid.";
+  }
 
   return null;
 }
@@ -597,6 +609,11 @@ export async function updatePlanItem(itemId: string, input: PlanItemMutationInpu
       qty: Number(input.qty),
       estimated_price: toRupiah(input.estimatedPrice),
       note: input.unit?.trim().slice(0, 20) || null,
+      // `undefined` sengaja tidak menghasilkan kunci apa pun, sehingga
+      // pemanggil yang tidak peduli harga aktual tidak menghapusnya.
+      ...(input.actualPrice === undefined
+        ? {}
+        : { actual_price: input.actualPrice === null ? null : toRupiah(input.actualPrice) }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", itemId);
@@ -968,19 +985,59 @@ export interface CompleteShoppingPlanInput {
   merchant: string;
   note?: string;
   actualPrices?: Record<string, number>;
+  /** Potongan per barang rencana, dipetakan dari id barang. */
+  itemDiscounts?: Record<string, number>;
   /** Barang yang dibeli di luar rencana (barang tambahan). */
   extraItems?: ExtraShoppingItemInput[];
+  /** Potongan atas seluruh transaksi. */
+  transactionDiscount?: number;
+  /** Voucher yang dipakai. */
+  voucher?: number;
+  /** Biaya tambahan (parkir, kantong belanja). */
+  fees?: number;
   /**
    * Total yang benar-benar dibayar di kasir. Bila diisi dan berbeda dari
-   * jumlah rincian, selisihnya dicatat sebagai satu baris penyesuaian agar
-   * total transaksi persis sama dengan struk.
+   * jumlah rincian, selisihnya dicatat sebagai SATU baris "Selisih struk"
+   * yang terlihat — harga barang tidak pernah diubah diam-diam agar cocok.
    */
   totalPaid?: number;
+  /**
+   * Pengguna sudah melihat selisihnya dan tetap ingin lanjut. Tanpa ini,
+   * selisih bukan-nol menggagalkan penyimpanan dan mengembalikan angkanya
+   * supaya bisa diperbaiki lebih dulu.
+   */
+  acceptDifference?: boolean;
   receiptIds?: string[];
   clientToken?: string;
 }
 
-export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Promise<ActionResult<{ id: string }>> {
+export interface CompleteShoppingPlanConflict {
+  /** Angka yang dihitung ulang OLEH SERVER dari rincian. */
+  totalCalculated: number;
+  totalPaid: number;
+  difference: number;
+}
+
+/**
+ * Selesaikan belanja: satu transaksi Pengeluaran kategori Belanja, satu kali
+ * pemotongan saldo.
+ *
+ * Yang IKUT dihitung hanyalah barang berstatus `bought` ditambah barang
+ * tambahan. Barang `pending` (belum sempat diambil) dan `cancelled` (tidak
+ * jadi dibeli) tidak pernah masuk total — versi sebelumnya memasukkan semua
+ * yang bukan `cancelled`, sehingga barang yang batal diambil dari rak tetap
+ * dibayar dan ikut ditandai "sudah dibeli".
+ *
+ * Seluruh total DIHITUNG ULANG di sini dengan `computeReceiptTotals`, memakai
+ * harga dari database — angka dari client hanya dipakai sebagai usulan harga,
+ * tidak pernah sebagai total. Bila hasilnya tidak sama dengan yang dibayar,
+ * penyimpanan DITOLAK dan selisihnya dikembalikan supaya bisa ditinjau; hanya
+ * `acceptDifference` yang membuatnya lanjut, dan selisih itu pun tercatat
+ * sebagai baris tersendiri.
+ */
+export async function completeShoppingPlan(
+  input: CompleteShoppingPlanInput
+): Promise<ActionResult<{ id: string }> & { conflict?: CompleteShoppingPlanConflict }> {
   const session = await requireFinanceSession();
   if (!session) return { success: false, error: FORBIDDEN };
 
@@ -1012,7 +1069,10 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
     .eq("plan_id", input.planId)
     .order("position");
 
-  const active = (rows ?? []).filter((item) => item.status !== "cancelled");
+  // HANYA yang sudah dicentang. `pending` berarti barangnya tidak jadi
+  // diambil dari rak; membebankannya ke transaksi membuat pembukuan
+  // membayar barang yang tidak pernah dibawa pulang.
+  const bought = (rows ?? []).filter((item) => item.status === "bought");
   const extras = (input.extraItems ?? [])
     .map((raw) => {
       const name = String(raw?.name ?? "").trim();
@@ -1027,33 +1087,57 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
     })
     .filter((item) => item.name.length > 0 && item.name.length <= MAX_ITEM_NAME_LENGTH);
 
-  if (active.length === 0 && extras.length === 0) {
-    return { success: false, error: "Tidak ada barang aktif untuk diselesaikan." };
+  if (bought.length === 0 && extras.length === 0) {
+    return {
+      success: false,
+      error: "Belum ada barang yang ditandai sudah dibeli. Centang barangnya dulu.",
+    };
   }
-  if (active.some((item) => item.transaction_id)) {
+  if (bought.some((item) => item.transaction_id)) {
     return { success: false, error: "Sebagian barang sudah pernah dicatat sebagai transaksi." };
   }
 
   const prices = input.actualPrices ?? {};
-  const items = active.map((item) => {
-    const actual = toRupiah(prices[item.id] ?? item.actual_price ?? item.estimated_price);
+  const discounts = input.itemDiscounts ?? {};
+
+  const lines = bought.map((item) => {
+    const proposed = toRupiah(prices[item.id] ?? item.actual_price ?? item.estimated_price);
     return {
       name: item.name,
       qty: Number(item.qty),
-      price: Number.isFinite(actual) && actual >= 0 ? actual : Number(item.estimated_price),
+      price: Number.isFinite(proposed) && proposed >= 0 ? proposed : Number(item.estimated_price),
+      discount: toRupiah(discounts[item.id] ?? 0),
       // Satuan checklist ikut ke transaksi, supaya detail transaksi menulis
       // "5 kg" persis seperti barisnya di checklist.
       unit: normalizeUnit(item.note),
     };
   });
 
-  items.push(...extras);
+  // Rumus yang sama dengan yang dipakai layar ringkasan — tetapi dijalankan
+  // ULANG di server memakai harga dari database, sehingga total tidak pernah
+  // ditentukan oleh angka yang dikirim client.
+  const totals = computeReceiptTotals({
+    items: lines,
+    extras,
+    transactionDiscount: input.transactionDiscount,
+    voucher: input.voucher,
+    fees: input.fees,
+    totalPaid: input.totalPaid,
+  });
 
-  // Total yang dibayar di kasir adalah kebenaran akhir: harga rincian
-  // diselaraskan agar jumlahnya persis sama (lihat lib/shopping-total.ts).
-  const totalPaid = toRupiah(input.totalPaid ?? 0);
-  const finalItems =
-    Number.isFinite(totalPaid) && totalPaid > 0 ? distributeTotal(items, totalPaid) : items;
+  if (!totals.balanced && !input.acceptDifference) {
+    return {
+      success: false,
+      error: `Total tidak cocok. Rincian ${formatRupiah(totals.totalCalculated)}, dibayar ${formatRupiah(totals.totalPaid)}.`,
+      conflict: {
+        totalCalculated: totals.totalCalculated,
+        totalPaid: totals.totalPaid,
+        difference: totals.difference,
+      },
+    };
+  }
+
+  const finalItems = toTransactionItems(totals);
 
   const result = await createShoppingTransaction({
     merchant,
@@ -1070,15 +1154,14 @@ export async function completeShoppingPlan(input: CompleteShoppingPlanInput): Pr
 
   if (!result.success || !result.data) return result;
 
-  // `finalItems` diawali oleh barang rencana dengan urutan yang sama dengan
-  // `active`, jadi harga hasil penyelarasan bisa dipetakan balik per barang.
-  for (const [index, item] of active.entries()) {
+  // `totals.lines` berurutan sama dengan `bought`, jadi harga efektif hasil
+  // hitung bisa dipetakan balik ke barang rencananya.
+  for (const [index, item] of bought.entries()) {
+    const line = totals.lines[index];
     await supabase
       .from("shopping_plan_items")
       .update({
-        status: "bought",
-        checked: true,
-        actual_price: finalItems[index]?.price ?? Number(item.estimated_price),
+        actual_price: line ? Math.round(line.subtotal / (line.qty || 1)) : Number(item.estimated_price),
         transaction_id: result.data.id,
         updated_at: new Date().toISOString(),
       })

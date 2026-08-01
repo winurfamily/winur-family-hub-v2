@@ -54,3 +54,15 @@ public/swe-worker-*.js.map
 
 # Referensi desain lokal (screenshot aplikasi lain) — tidak ikut repo.
 /Docs/DESAIN REVISI/
+
+# Struk belanja keluarga — DOKUMEN PRIBADI, tidak boleh masuk repo.
+# Berisi nama pembeli, nomor pelanggan, dan rincian belanja. Tempatnya di
+# bucket privat Supabase `receipts` (path per family_id, diakses lewat signed
+# URL), bukan di Git yang riwayatnya permanen dan bisa dibaca siapa pun yang
+# punya akses repo.
+/Docs/*.pdf
+/Docs/**/*.pdf
+
+# Hasil OCR / berkas sementara pemrosesan struk.
+/Docs/_ocr/
+*.ocr.json

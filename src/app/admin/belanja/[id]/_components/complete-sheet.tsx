@@ -23,9 +23,50 @@ import { completeShoppingPlan, type PlanItemView, type PlanView } from "@/app/ac
 import type { FinanceSummary } from "@/app/actions/keuangan";
 import { formatRupiah } from "@/lib/format";
 import { MAX_ITEM_NAME_LENGTH } from "@/lib/shopping-item";
+import { computeReceiptTotals } from "@/lib/shopping-receipt";
 import { useTodayJakarta } from "@/lib/use-today";
+import { cn } from "@/lib/utils";
 
 const newExtra = (): ItemDraft => ({ key: crypto.randomUUID(), name: "", qty: "1", unit: "", price: 0 });
+
+/** Satu baris ringkasan. Angka negatif ditulis dengan tanda minus sungguhan. */
+function SummaryRow({
+  label,
+  value,
+  strong,
+  muted,
+  tone,
+}: {
+  label: string;
+  value: number;
+  strong?: boolean;
+  muted?: boolean;
+  tone?: "danger";
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span
+        className={cn(
+          "font-semibold text-ink-3",
+          strong && "font-black text-ink-1",
+          muted && "text-[11.5px]"
+        )}
+      >
+        {label}
+      </span>
+      <span
+        className={cn(
+          "tabular shrink-0 font-bold text-ink-2",
+          strong && "font-black text-ink-1",
+          muted && "text-[11.5px] font-semibold text-ink-3",
+          tone === "danger" && "text-destructive"
+        )}
+      >
+        {value < 0 ? `−${formatRupiah(Math.abs(value))}` : formatRupiah(value)}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Penyelesaian belanja: satu layar untuk total yang dibayar, toko, tanggal,
@@ -67,9 +108,14 @@ export function CompleteSheet({
   const [source, setSource] = useState("main");
   const [note, setNote] = useState("");
   const [totalPaid, setTotalPaid] = useState(0);
+  const [transactionDiscount, setTransactionDiscount] = useState(0);
+  const [voucher, setVoucher] = useState(0);
+  const [fees, setFees] = useState(0);
   const [extras, setExtras] = useState<ItemDraft[]>([]);
   const [receipt, setReceipt] = useState<AttachedReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Pengguna sudah melihat selisihnya dan memilih tetap melanjutkan. */
+  const [acceptDifference, setAcceptDifference] = useState(false);
 
   // Setiap kali panel dibuka, tanggalnya kembali ke hari ini yang sebenarnya
   // — kecuali pengguna memang sudah menggantinya sendiri.
@@ -78,18 +124,40 @@ export function CompleteSheet({
     setDate(today);
   }, [open, today, dateTouched]);
 
-  const active = items.filter((item) => item.status !== "cancelled");
+  // HANYA yang sudah dicentang ikut dihitung — sama persis dengan aturan di
+  // server. Barang yang belum dibeli dan yang dibatalkan tidak pernah masuk.
+  const bought = items.filter((item) => item.status === "bought");
+  const notBought = items.filter((item) => item.status === "pending");
 
-  const estimated = useMemo(
+  const totals = useMemo(
     () =>
-      active.reduce((acc, item) => acc + Math.round(item.qty * (item.actualPrice ?? item.estimatedPrice)), 0) +
-      extras.reduce((acc, row) => acc + Math.round(parseQty(row.qty) * row.price), 0),
-    [active, extras]
+      computeReceiptTotals({
+        items: bought.map((item) => ({
+          name: item.name,
+          qty: item.qty,
+          price: item.actualPrice ?? item.estimatedPrice,
+          unit: item.unit ?? undefined,
+        })),
+        extras: extras
+          .filter((row) => row.name.trim().length > 0)
+          .map((row) => ({
+            name: row.name.trim(),
+            qty: parseQty(row.qty),
+            price: row.price,
+            unit: row.unit,
+          })),
+        transactionDiscount,
+        voucher,
+        fees,
+        totalPaid,
+      }),
+    [bought, extras, transactionDiscount, voucher, fees, totalPaid]
   );
 
-  const total = totalPaid > 0 ? totalPaid : estimated;
+  const total = totals.hasPaid ? totals.totalPaid : totals.totalCalculated;
   const available = source === "main" ? saldoUtama : pockets.find((p) => p.id === source)?.balance ?? 0;
   const insufficient = total > available;
+  const mismatch = totals.hasPaid && totals.difference !== 0;
 
   const patchExtra = (key: string, next: Partial<ItemDraft>) =>
     setExtras((current) => current.map((row) => (row.key === key ? { ...row, ...next } : row)));
@@ -108,12 +176,20 @@ export function CompleteSheet({
       .filter((row) => row.name.length > 0);
 
     if (!merchant.trim()) return setError("Nama toko wajib diisi.");
-    if (active.length === 0 && cleanExtras.length === 0) {
-      return setError("Tidak ada barang untuk diselesaikan.");
+    if (bought.length === 0 && cleanExtras.length === 0) {
+      return setError("Belum ada barang yang ditandai sudah dibeli. Centang barangnya dulu.");
     }
     if (total <= 0) return setError("Isi total yang dibayar atau harga barangnya.");
     if (insufficient) {
       return setError(`Saldo tidak cukup. Total ${formatRupiah(total)}, tersedia ${formatRupiah(available)}.`);
+    }
+    // Selisih harus diakui secara sadar. Tanpa centang ini server pun
+    // menolaknya — pemeriksaan di sini hanya supaya pesannya muncul lebih
+    // cepat, bukan sebagai satu-satunya penjaga.
+    if (mismatch && !acceptDifference) {
+      return setError(
+        `Rincian ${formatRupiah(totals.totalCalculated)} tidak sama dengan pembayaran ${formatRupiah(totals.totalPaid)}. Perbaiki harganya, atau centang persetujuan selisih di bawah.`
+      );
     }
     setError(null);
 
@@ -127,7 +203,11 @@ export function CompleteSheet({
         merchant: merchant.trim(),
         note: note.trim() || undefined,
         extraItems: cleanExtras,
+        transactionDiscount: transactionDiscount || undefined,
+        voucher: voucher || undefined,
+        fees: fees || undefined,
         totalPaid: totalPaid > 0 ? totalPaid : undefined,
+        acceptDifference,
         receiptIds: receipt ? [receipt.id] : undefined,
         clientToken: tokenRef.current!,
       });
@@ -184,7 +264,8 @@ export function CompleteSheet({
               autoFocus
             />
             <p className="text-[11px] font-semibold text-ink-3">
-              Perkiraan dari daftar {formatRupiah(estimated)}. Kosongkan untuk memakai angka itu.
+              Hitungan dari rincian {formatRupiah(totals.totalCalculated)}. Kosongkan untuk memakai angka
+              itu.
             </p>
           </div>
 
@@ -289,28 +370,73 @@ export function CompleteSheet({
             )}
           </section>
 
-          {active.length > 0 && (
+          <section className="grid gap-3.5 rounded-2xl bg-surface-2 p-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="done-discount">Diskon transaksi</Label>
+              <CurrencyInput
+                id="done-discount"
+                value={transactionDiscount}
+                onValueChange={setTransactionDiscount}
+                disabled={isPending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="done-voucher">Voucher</Label>
+              <CurrencyInput
+                id="done-voucher"
+                value={voucher}
+                onValueChange={setVoucher}
+                disabled={isPending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="done-fees">Biaya tambahan</Label>
+              <CurrencyInput id="done-fees" value={fees} onValueChange={setFees} disabled={isPending} />
+            </div>
+          </section>
+
+          {bought.length > 0 && (
             <section className="space-y-2 rounded-2xl bg-surface-2 p-3">
               <h3 className="font-heading text-sm font-black text-ink-1">
-                Barang dari checklist ({active.length})
+                Barang sudah dibeli ({bought.length})
               </h3>
               <ul className="divide-y divide-border">
-                {active.map((item) => (
+                {bought.map((item) => (
                   <li key={item.id} className="py-1.5">
                     <ItemLine
                       name={item.name}
                       qty={item.qty}
                       unit={item.unit}
                       meta={
-                        item.estimatedPrice > 0
-                          ? `perkiraan ${formatRupiah(item.estimatedSubtotal)}`
-                          : "harga menyesuaikan total yang dibayar"
+                        item.actualPrice !== null
+                          ? `${formatRupiah(item.actualPrice)}/satuan`
+                          : item.estimatedPrice > 0
+                            ? `perkiraan ${formatRupiah(item.estimatedPrice)}/satuan`
+                            : "harga belum diisi"
+                      }
+                      trailing={
+                        <span className="tabular shrink-0 text-[13px] font-black text-ink-1">
+                          {formatRupiah(
+                            Math.round(item.qty * (item.actualPrice ?? item.estimatedPrice))
+                          )}
+                        </span>
                       }
                     />
                   </li>
                 ))}
               </ul>
             </section>
+          )}
+
+          {notBought.length > 0 && (
+            <p className="rounded-xl bg-surface-2 px-3 py-2 text-[11px] font-semibold text-ink-3">
+              {notBought.length} barang belum dicentang dan TIDAK ikut dihitung:{" "}
+              {notBought
+                .slice(0, 5)
+                .map((i) => i.name)
+                .join(", ")}
+              {notBought.length > 5 ? `, dan ${notBought.length - 5} lainnya` : ""}.
+            </p>
           )}
 
           <div className="space-y-1.5">
@@ -337,12 +463,66 @@ export function CompleteSheet({
             </p>
           )}
 
+          {/* Ringkasan sebelum konfirmasi: setiap komponen angka ditulis
+              terpisah supaya total akhir bisa ditelusuri baris demi baris,
+              bukan muncul sebagai satu angka yang harus dipercaya. */}
+          <section className="space-y-1 rounded-2xl border-2 border-border bg-card p-3 text-[13px]">
+            <SummaryRow label="Total sebelum diskon" value={totals.totalBeforeDiscount} />
+            {totals.extrasTotal > 0 && (
+              <SummaryRow label="— termasuk barang tambahan" value={totals.extrasTotal} muted />
+            )}
+            {totals.itemDiscountTotal > 0 && (
+              <SummaryRow label="Diskon per barang" value={-totals.itemDiscountTotal} />
+            )}
+            {totals.transactionDiscount > 0 && (
+              <SummaryRow label="Diskon transaksi" value={-totals.transactionDiscount} />
+            )}
+            {totals.voucher > 0 && <SummaryRow label="Voucher" value={-totals.voucher} />}
+            {totals.fees > 0 && <SummaryRow label="Biaya tambahan" value={totals.fees} />}
+            <div className="!mt-2 border-t border-border pt-2">
+              <SummaryRow label="Total akhir seharusnya" value={totals.totalCalculated} strong />
+            </div>
+            {totals.hasPaid && <SummaryRow label="Total dibayar" value={totals.totalPaid} />}
+            {mismatch && (
+              <div className="!mt-2 rounded-xl bg-destructive/10 px-3 py-2">
+                <SummaryRow
+                  label={totals.difference > 0 ? "Kelebihan bayar" : "Kekurangan bayar"}
+                  value={totals.difference}
+                  strong
+                  tone="danger"
+                />
+              </div>
+            )}
+          </section>
+
+          {mismatch && (
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-surface-2 p-3">
+              <input
+                type="checkbox"
+                checked={acceptDifference}
+                onChange={(e) => setAcceptDifference(e.target.checked)}
+                disabled={isPending}
+                className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--primary)]"
+              />
+              <span className="text-[12px] font-semibold text-ink-2">
+                Saya sudah memeriksa dan tetap ingin menyimpan. Selisih{" "}
+                <strong className="text-ink-1">{formatRupiah(Math.abs(totals.difference))}</strong>{" "}
+                akan dicatat sebagai baris tersendiri, bukan disembunyikan ke harga barang.
+              </span>
+            </label>
+          )}
+
           <Panel className="bg-rose-hero p-4 text-white">
             <p className="text-[11px] font-black uppercase tracking-wide text-white/75">Total transaksi</p>
             <p className="tabular font-mono text-2xl font-black">{formatRupiah(total)}</p>
           </Panel>
 
-          <GameButton type="submit" variant="primary" block disabled={isPending || total <= 0}>
+          <GameButton
+            type="submit"
+            variant="primary"
+            block
+            disabled={isPending || total <= 0 || (mismatch && !acceptDifference)}
+          >
             {isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Memproses…

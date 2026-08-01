@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Camera, ImagePlus, Loader2, RotateCcw, ScanLine } from "lucide-react";
 import { GameButton } from "@/components/ui/game-button";
 import { ShoppingForm } from "./shopping-form";
+import { ReceiptImport } from "./receipt-import";
 import type { AttachedReceipt } from "./receipt-uploader";
 import { scanReceipt, type ScannedItem } from "@/app/actions/scan";
 import { uploadReceipt } from "@/app/actions/receipts";
@@ -140,7 +141,8 @@ export function BelanjaScan({ pockets, saldoUtama }: { pockets: PocketSummary[];
   }
 
   return (
-    <div className="rounded-[20px] bg-card p-5 text-center shadow-card">
+    <div className="space-y-3">
+      <div className="rounded-[20px] bg-card p-5 text-center shadow-card">
       <input
         ref={cameraRef}
         type="file"
@@ -192,6 +194,12 @@ export function BelanjaScan({ pockets, saldoUtama }: { pockets: PocketSummary[];
           </div>
         </>
       )}
+      </div>
+
+      {/* Jalur kedua pada pipeline Scan yang SAMA: bukan menuju transaksi
+          langsung, melainkan menuju rencana baru yang harus ditinjau dulu.
+          Dipakai untuk struk panjang berhalaman banyak. */}
+      {!busy && <ReceiptImport />}
     </div>
   );
 }

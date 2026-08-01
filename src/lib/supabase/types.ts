@@ -546,6 +546,27 @@ export type ReceiptAttachmentRow = {
   created_at: string;
 };
 
+/**
+ * Jejak satu berkas struk yang pernah diimpor menjadi rencana (migration 0026).
+ * Sidik jarinya unik per keluarga, sehingga struk yang sama tidak pernah
+ * melahirkan rencana kedua.
+ */
+export type ReceiptImportRow = {
+  id: string;
+  family_id: string;
+  plan_id: string | null;
+  file_fingerprint: string;
+  data_fingerprint: string | null;
+  merchant: string | null;
+  receipt_date: string | null;
+  total_amount: number | null;
+  item_count: number;
+  page_count: number;
+  storage_path: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
@@ -791,6 +812,20 @@ export interface Database {
         | "width"
         | "height"
         | "uploaded_by"
+        | "created_at"
+      >;
+      receipt_imports: Helper<
+        ReceiptImportRow,
+        | "id"
+        | "plan_id"
+        | "data_fingerprint"
+        | "merchant"
+        | "receipt_date"
+        | "total_amount"
+        | "item_count"
+        | "page_count"
+        | "storage_path"
+        | "created_by"
         | "created_at"
       >;
       monthly_budgets: Helper<
